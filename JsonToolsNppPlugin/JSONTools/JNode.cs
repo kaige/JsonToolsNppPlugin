@@ -713,10 +713,20 @@ namespace JSON_Tools.JSON_Tools
         // "dot compatible" means a string that starts with a letter or underscore
         // and contains only letters, underscores, and digits
 
-        public bool ContainsPosition(int pos)
+        public bool ContainsPosition(int pos, int keyLength = 0)
         {
             if (position == pos)
                 return true;
+            else if (position > pos)
+            {
+                // handle the case where the cursor is put on the "key" text
+                // hard code a supplement number 4 because there's for extra character for a key: ", ", :, and a blank char
+                //
+                if (position - keyLength - 4 < pos)
+                {
+                    return true;
+                }
+            }
             if ((type & Dtype.ARR_OR_OBJ) != 0)
                 return false;
             //if (extras is ExtraJNodeProperties ext)
@@ -742,10 +752,10 @@ namespace JSON_Tools.JSON_Tools
             return PathToPositionHelper(pos, style, new List<object>());
         }
 
-        public string PathToPositionHelper(int pos, KeyStyle style, List<object> path)
+        public string PathToPositionHelper(int pos, KeyStyle style, List<object> path, int keyLength =0)
         {
             string result;
-            if (ContainsPosition(pos))
+            if (ContainsPosition(pos, keyLength))
                 return FormatPath(path, style);
             if (this is JArray arr)
             {
@@ -768,7 +778,7 @@ namespace JSON_Tools.JSON_Tools
                 foreach (KeyValuePair<string, JNode> kv in obj.children)
                 {
                     path.Add(kv.Key);
-                    result = kv.Value.PathToPositionHelper(pos, style, path);
+                    result = kv.Value.PathToPositionHelper(pos, style, path, kv.Key.Length);
                     if (result.Length > 0)
                         return result;
                     path.RemoveAt(path.Count - 1);
