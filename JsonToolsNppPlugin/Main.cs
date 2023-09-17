@@ -325,7 +325,26 @@ namespace Kbg.NppPluginNET
                 //    int wm = -(int)code;
                 //    }
                 //}
+
+            case (uint)SciMsg.SCI_GETCHARAT:
+                if (openTreeViewer != null)
+                {
+                    int pos = Npp.editor.GetCurrentPos();
+                    string result = PathToPosition(settings.key_style, pos);
+                    if (result != null && result.Length != 0)
+                    {
+                        Npp.TryCopyToClipboard(result);
+                        openTreeViewer.SetQueryBoxText("@" + result);
+                    }
+                    else
+                    {
+                        openTreeViewer.SetQueryBoxText("@");
+                    }
+                            
+                }
+                return;
             }
+
         }
 
         static internal void FileBeforeRename(IntPtr bufferRenamedId)
