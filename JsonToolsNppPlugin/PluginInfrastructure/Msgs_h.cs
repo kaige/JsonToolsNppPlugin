@@ -17,14 +17,20 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
 
     public enum LangType
     {
-        L_TEXT, L_PHP, L_C, L_CPP, L_CS, L_OBJC, L_JAVA, L_RC,
+        L_TEXT, L_PHP , L_C, L_CPP, L_CS, L_OBJC, L_JAVA, L_RC,
         L_HTML, L_XML, L_MAKEFILE, L_PASCAL, L_BATCH, L_INI, L_ASCII, L_USER,
-        L_ASP, L_SQL, L_VB, L_JS, L_CSS, L_PERL, L_PYTHON, L_LUA,
+        L_ASP, L_SQL, L_VB, L_JS, L_CSS, L_PERL, L_PYTHON, L_LUA, 
         L_TEX, L_FORTRAN, L_BASH, L_FLASH, L_NSIS, L_TCL, L_LISP, L_SCHEME,
         L_ASM, L_DIFF, L_PROPS, L_PS, L_RUBY, L_SMALLTALK, L_VHDL, L_KIX, L_AU3,
         L_CAML, L_ADA, L_VERILOG, L_MATLAB, L_HASKELL, L_INNO, L_SEARCHRESULT,
         L_CMAKE, L_YAML, L_COBOL, L_GUI4CLI, L_D, L_POWERSHELL, L_R, L_JSP,
-        L_COFFEESCRIPT, L_JSON, L_JAVASCRIPT, L_FORTRAN_77,
+        L_COFFEESCRIPT, L_JSON, L_JAVASCRIPT, L_FORTRAN_77, L_BAANC, L_SREC,
+        L_IHEX, L_TEHEX, L_SWIFT,
+        L_ASN1, L_AVS, L_BLITZBASIC, L_PUREBASIC, L_FREEBASIC, 
+        L_CSOUND, L_ERLANG, L_ESCRIPT, L_FORTH, L_LATEX, 
+        L_MMIXAL, L_NIM, L_NNCRONTAB, L_OSCRIPT, L_REBOL, 
+        L_REGISTRY, L_RUST, L_SPICE, L_TXT2TAGS, L_VISUALPROLOG,
+        L_TYPESCRIPT, L_JSON5, L_MSSQL, L_GDSCRIPT, L_HOLLYWOOD,
         // Don't use L_JS, use L_JAVASCRIPT instead
         // The end of enumated language type, so it should be always at the end
         L_EXTERNAL
@@ -286,6 +292,8 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
         NPPM_RELOADBUFFERID = Constants.NPPMSG + 61,
 
         ///<summary>
+        /// BOOL NPPM_INTERNAL_SETFILENAME(UINT_PTR bufferID, const TCHAR * newName)<br></br>
+        /// <strong>Removed in Notepad++ 8.6.9</strong> (replaced by <see cref="NPPM_SETUNTITLEDNAME"/>)<br></br>
         ///wParam: BufferID to rename<br></br>
         ///lParam: name to set (TCHAR*)<br></br>
         ///Buffer must have been previously unnamed (eg "new 1" document types)
@@ -567,6 +575,34 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
         /// </summary>
         NPPM_ADDTOOLBARICON_FORDARKMODE = Constants.NPPMSG + 101,
 
+        /// <summary>
+        /// BOOL NPPM_ALLOCATEINDICATOR(int numberRequested, int* startNumber)<br></br>
+        /// Allocates an indicator number to a plugin: if a plugin needs to add an indicator,
+        /// it has to use this message to get the indicator number, in order to prevent a conflict with the other plugins.<br></br>
+        /// wParam[in]: numberRequested is the number of ID you request for the reservation<br></br>
+        /// lParam[out]: startNumber will be set to the initial command ID if successful<br></br>
+        /// Return TRUE if successful, FALSE otherwise. startNumber will also be set to 0 if unsuccessful<br></br>
+        ///
+        /// Example: If a plugin needs 1 indicator ID, the following code can be used :<br></br>
+        ///
+        ///    int idBegin;<br></br>
+        ///    BOOL isAllocatedSuccessful = ::SendMessage(nppData._nppHandle, NPPM_ALLOCATEINDICATOR, 1, &amp;idBegin);<br></br>
+        ///
+        /// if isAllocatedSuccessful is TRUE, and value of idBegin is 7
+        /// then indicator ID 7 is preserved by Notepad++, and it is safe to be used by the plugin.
+        /// </summary>
+        NPPM_ALLOCATEINDICATOR = Constants.NPPMSG + 113,
+
+        /// <summary>
+        /// int NPPM_SETUNTITLEDNAME(BufferID id, const TCHAR* newName)<br></br>
+        /// <strong>Added in Notepad++ 8.6.9</strong> (drop-in replacement for <see cref="NPPM_INTERNAL_SETFILENAME"/>)<br></br>
+        /// Rename the tab name for an untitled tab.<br></br>
+        /// wParam[in]: id - BufferID of the tab. -1 for currently active tab<br></br>
+        /// lParam[in]: newName - the desired new name of the tab<br></br>
+        /// Return TRUE upon success; FALSE upon failure
+        /// </summary>
+        NPPM_SETUNTITLEDNAME = Constants.NPPMSG + 115,
+
         RUNCOMMAND_USER = Constants.WM_USER + 3000,
         NPPM_GETFULLCURRENTPATH = RUNCOMMAND_USER + FULL_CURRENT_PATH,
         NPPM_GETCURRENTDIRECTORY = RUNCOMMAND_USER + CURRENT_DIRECTORY,
@@ -811,6 +847,17 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
         ///scnNotification->nmhdr.idFrom = BufferID;
         /// </summary>
         NPPN_FILEDELETED = NPPN_FIRST + 26,
+
+        /// <summary>
+        /// To notify plugins that the current document is just modified by Replace All action.<br></br>
+        /// For solving the performance issue (from v8.6.4), Notepad++ doesn't trigger SCN_MODIFIED during Replace All action anymore.<br></br>
+        /// As a result, the plugins which monitor SCN_MODIFIED should also monitor NPPN_GLOBALMODIFIED.<br></br>
+        /// <strong>This notification is implemented in Notepad++ v8.6.5.</strong><br></br>
+        /// scnNotification->nmhdr.code = NPPN_GLOBALMODIFIED;<br></br>
+        /// scnNotification->nmhdr.hwndFrom = BufferID;<br></br>
+        /// scnNotification->nmhdr.idFrom = 0; // preserved for the future use, must be zero
+        /// </summary>
+        NPPN_GLOBALMODIFIED = NPPN_FIRST + 30,
 
         /* --Autogenerated -- end of section automatically generated from notepad-plus-plus\PowerEditor\src\MISC\PluginsManager\Notepad_plus_msgs.h * */
     }

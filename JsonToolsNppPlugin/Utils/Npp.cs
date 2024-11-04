@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
+using JSON_Tools.JSON_Tools;
 using Kbg.NppPluginNET;
 using Kbg.NppPluginNET.PluginInfrastructure;
 
@@ -34,7 +35,16 @@ namespace JSON_Tools.Utils
 
         public static readonly bool nppVersionAtLeast8 = nppVersion[0] >= 8;
 
-        public static readonly bool nppVersionAtLeast8p5p5 = nppVersionStr.CompareTo("8.5.5") >= 0;
+        /// <summary>this is when NPPM_ALLOCATEINDICATORS was introduced</summary>
+        public static readonly bool nppVersionAtLeast8p5p6 = nppVersionStr.CompareTo("8.5.6") >= 0;
+
+        /// <summary>
+        /// the directory containing of the plugin DLL (i.e., the DLL that this code compiles into)<br></br>
+        /// usually Path.Combine(notepad.GetNppPath(), "plugins", Main.PluginName) would work just as well,<br></br>
+        /// but under some weird circumstances (see this GitHub issue comment: https://github.com/molsonkiko/NppCSharpPluginPack/issues/5#issuecomment-1982167513)<br></br>
+        /// it can fail.
+        /// </summary>
+        public static readonly string pluginDllDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
         /// <summary>
         /// append text to current doc, then append newline and move cursor
@@ -48,13 +58,90 @@ namespace JSON_Tools.Utils
 
         /// <summary>
         /// set the lexer language to JSON so the file looks nice<br></br>
-        /// If the file is really big (default 4+ MB, configured by settings.max_size_full_tree_MB),
-        /// this is a no-op, because lexing big JSON files is very slow.
+        /// DOES NOTHING IF:<br></br>
+        /// 1. the file is really big (default 4+ MB, configured by settings.max_size_full_tree_MB)<br></br>
+        /// 2. fatalError is true (don't lex documents that couldn't be parsed as JSON without fatal errors)<br></br>
+        /// 3. usesSelections is true (selection-based documents might contain JSON without being JSON documents)<br></br>
+        /// 4. the documentType is not DocumentType.JSON or DocumentType.JSONL (any other DocumentType is not JSON-related)
         /// </summary>
-        public static void SetLangJson()
+        public static void SetLangJson(bool fatalError = false, bool usesSelections = false)
         {
-            if (editor.GetLength() < Main.settings.max_file_size_MB_slow_actions * 1e6)
+            if (editor.GetLength() < Main.settings.max_file_size_MB_slow_actions * 1e6
+                && !fatalError
+                && !usesSelections)
+            {
                 notepad.SetCurrentLanguage(LangType.L_JSON);
+            }
+        }
+
+        public static void SetLangIni(bool fatalError, bool usesSelections)
+        {
+            if (editor.GetLength() < Main.settings.max_file_size_MB_slow_actions * 1e6
+                && !fatalError
+                && !usesSelections)
+            {
+                notepad.SetCurrentLanguage(LangType.L_INI);
+            }
+        }
+
+        private static bool stopShowingFileTooLongNotifications = false;
+
+        /// <summary>
+        /// if <see cref="IScintillaGateway.GetLength"/> returns a number greater than <see cref="int.MaxValue"/>, return false and set len to -1.<br></br>
+        /// Otherwise, return true and set len to the length of the document.<br></br>
+        /// If showMessageOnFail, show a message box warning the user that the command could not be executed.
+        /// </summary>
+        public static bool TryGetLengthAsInt(out int len, bool showMessageOnFail = true)
+        {
+            long result = editor.GetLength();
+            if (result > int.MaxValue)
+            {
+                len = -1;
+                if (!stopShowingFileTooLongNotifications && showMessageOnFail)
+                {
+                    stopShowingFileTooLongNotifications = Translator.ShowTranslatedMessageBox(
+                        "JsonTools cannot perform this plugin command on a file with more than 2147483647 bytes.\r\nDo you want to stop showing notifications when a file is too long?",
+                        "File too long for JsonTools",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+
+                }
+                return false;
+            }
+            len = (int)result;
+            return true;
+        }
+
+        public static DocumentType DocumentTypeFromFileExtension(string fileExtension)
+        {
+            switch (fileExtension)
+            {
+            case "json":
+            case "json5":
+            case "jsonc":
+                return DocumentType.JSON;
+            case "jsonl":
+                return DocumentType.JSONL;
+            case "ini":
+                return DocumentType.INI;
+            default:
+                return DocumentType.NONE;
+            }
+        }
+
+        public static void SetLangBasedOnDocType(bool fatalError, bool usesSelections, DocumentType documentType)
+        {
+            switch (documentType)
+            {
+            case DocumentType.JSON:
+            case DocumentType.JSONL:
+                SetLangJson(fatalError, usesSelections);
+                break;
+            case DocumentType.INI:
+                SetLangIni(fatalError, usesSelections);
+                break;
+            default:
+                break;
+            }
         }
 
         /// <summary>
@@ -112,7 +199,7 @@ namespace JSON_Tools.Utils
         {
             if (text == null || text.Length == 0)
             {
-                MessageBox.Show("Couldn't find anything to copy to the clipboard",
+                Translator.ShowTranslatedMessageBox("Couldn't find anything to copy to the clipboard",
                     "Nothing to copy to clipboard",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning
@@ -148,7 +235,9 @@ namespace JSON_Tools.Utils
         /// </summary>
         public static void RemoveTrailingSOH()
         {
-            int lastPos = editor.GetLength() - 1;
+            if (!TryGetLengthAsInt(out int lastPos, false))
+                return;
+            lastPos--;
             int lastChar = editor.GetCharAt(lastPos);
             if (lastChar == 0x01)
             {
@@ -183,6 +272,17 @@ namespace JSON_Tools.Utils
             if (eolType < 0 || eolType >= 3)
                 return "\n";
             return newlines[eolType];
+        }
+
+        public static string DocumentTypeSuperTypeName(DocumentType documentType)
+        {
+            switch (documentType)
+            {
+            case DocumentType.JSON: return "JSON";
+            case DocumentType.JSONL: return "JSON";
+            case DocumentType.INI: return "INI file";
+            default: return documentType.ToString();
+            }
         }
 
         public static readonly Dictionary<int, string> ModificationTypeFlagNames = new Dictionary<int, string>
@@ -232,5 +332,12 @@ namespace JSON_Tools.Utils
             string nppVerStr = $"{nppVer[0]}.{nppVer[1]}.{nppVer[2]}";
             return include32bitVs64bit ? $"{nppVerStr} {IntPtr.Size * 8}bit" : nppVerStr;
         }
+    }
+
+    public enum AskUserWhetherToDoThing
+    {
+        DONT_DO_DONT_ASK,
+        ASK_BEFORE_DOING,
+        DO_WITHOUT_ASKING,
     }
 }

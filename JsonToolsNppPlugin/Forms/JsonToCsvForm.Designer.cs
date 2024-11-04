@@ -15,6 +15,7 @@
         {
             if (disposing && (components != null))
             {
+                NppFormHelper.UnregisterFormIfModeless(this, true);
                 components.Dispose();
             }
             base.Dispose(disposing);
@@ -194,6 +195,7 @@
             this.eolComboBox.Name = "eolComboBox";
             this.eolComboBox.Size = new System.Drawing.Size(75, 26);
             this.eolComboBox.TabIndex = 2;
+            this.eolComboBox.KeyUp += new System.Windows.Forms.KeyEventHandler(this.JsonToCsvForm_KeyUp);
             // 
             // JsonToCsvForm
             // 
@@ -202,23 +204,22 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.AcceptCancelButton;
             this.ClientSize = new System.Drawing.Size(355, 328);
+            this.Controls.Add(this.KeySepBoxLabel);
+            this.Controls.Add(this.KeySepBox);
+            this.Controls.Add(this.DelimBox);
+            this.Controls.Add(this.DelimBoxLabel);
             this.Controls.Add(this.eolComboBoxLabel);
             this.Controls.Add(this.eolComboBox);
-            this.Controls.Add(this.AcceptCancelButton);
-            this.Controls.Add(this.DocsButton);
-            this.Controls.Add(this.GenerateCSVButton);
-            this.Controls.Add(this.DelimBoxLabel);
-            this.Controls.Add(this.KeySepBoxLabel);
+            this.Controls.Add(this.BoolsToIntsCheckBox);
             this.Controls.Add(this.StrategyBoxLabel);
             this.Controls.Add(this.StrategyBox);
-            this.Controls.Add(this.BoolsToIntsCheckBox);
-            this.Controls.Add(this.DelimBox);
+            this.Controls.Add(this.GenerateCSVButton);
+            this.Controls.Add(this.DocsButton);
             this.Controls.Add(this.JsonToCsvFormTitle);
-            this.Controls.Add(this.KeySepBox);
+            this.Controls.Add(this.AcceptCancelButton);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "JsonToCsvForm";
             this.Text = "JSON to CSV";
-            this.KeyDown += new System.Windows.Forms.KeyEventHandler(this.JsonToCsvForm_KeyUp);
             this.ResumeLayout(false);
             this.PerformLayout();
 

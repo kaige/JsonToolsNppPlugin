@@ -1,187 +1,425 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using JSON_Tools.Utils;
 
 namespace JSON_Tools.JSON_Tools
 {
-	/// <summary>
+    /// <summary>
 	/// Reads JSON files based on search patterns, and also fetches JSON from APIS.
-	/// Combines all JSON into a map, fname_jsons, from filenames/urls to JSON.
+	/// Combines all JSON into a map, fnameJsons, from filenames/urls to JSON.
 	/// </summary>
 	public class JsonGrepper
 	{
+        /// <summary>
+        /// if true, <see cref="ParseJsonStrings"/> may divide the strings to be parsed into multiple threads.
+        /// </summary>
+        public const bool PARSER_PARALLEL = false;
+        /// <summary>
+        /// if true, <see cref="ParseJsonStrings"/> is asynchronous and can be canceled.
+        /// </summary>
+        public const bool CAN_CANCEL_PARSING = true;
+        /// <summary>
+        /// the limits are significantly lower than you might expect,
+        /// because the combined memory of the tree view and the Notepad++ buffer and the JNodes could exhaust all the memory that the OS allocated to Notepad++.<br></br>
+        /// Also, in my experience 32-bit Notepad++ has really unpredictable and bad performance even with buffers as small as 70 MB.
+        /// </summary>
+        public static readonly int MAX_COMBINED_LENGTH_TEXT_TO_PARSE = IntPtr.Size == 4 ? 70_000_000 : 400_000_000;
+        /// <summary>
+        /// Do not report progress while reading files unless there are at least this many files
+        /// </summary>
+        private const int PROGRESS_REPORT_FILE_READING_MIN_COUNT = 64;
+        /// <summary>
+        /// do not report progress while parsing unless there are at least this many files
+        /// </summary>
+        private const int PROGRESS_REPORT_FILE_MIN_COUNT = 16;
+        /// <summary>
+        /// do not report progress (while parsing or reading files) unless the combined length of all files to be parsed is at least this great
+        /// </summary>
+        private const int PROGRESS_REPORT_TEXT_MIN_TOT_LENGTH = 8_000_000;
+        /// <summary>
+        /// If the total combined length of all files to be parsed is at least this great,<br></br>
+        /// show a progress bar <i>even if there are fewer than <see cref="PROGRESS_REPORT_FILE_MIN_COUNT"/> files.</i>
+        /// </summary>
+        private const int PROGRESS_REPORT_TEXT_MIN_TOT_LENGTH_IF_LT_MINCOUNT_FILES = 50_000_000;
 		/// <summary>
 		/// maps filenames and urls to parsed JSON
 		/// </summary>
-		public JObject fname_jsons;
+		public JObject fnameJsons;
         public JObject exceptions;
-        public Dictionary<string, string> fname_strings;
-		public JsonParser json_parser;
+        public Dictionary<string, string> fnameStrings;
+		public JsonParser jsonParser;
+        /// <summary>
+        /// True while this is running <see cref="Grep"/> or <see cref="GetJsonFromApis(string[])"/>
+        /// </summary>
+        public bool isBusy { get; private set; }
         private static readonly HttpClient httpClient = new HttpClient();
-        public int max_threads_parsing;
+        /// <summary>
+        /// the combined length of all files to be parsed
+        /// </summary>
+        private int totalLengthToParse;
+        /// <summary>
+        /// Called before beginning progress reporting for file reading or parsing
+        /// </summary>
+        /// <param name="totalNumber">When reporting progress for parsing, the combined number of characters in all files to parse.<br></br>
+        /// Otherwise, the total number of all files to search (before determining whether their names match)</param>
+        /// <param name="totalLengthOnHardDrive">-1 if this is called when reporting progress for parsing.<br></br>
+        /// Otherwise, this is the combined size (on hard drive) of all files to search (before determining whether their names match)</param>
+        public delegate void ProgressReportSetup(int totalNumber, long totalLengthOnHardDrive);
+        public delegate void ProgressReportCallback(int numberSoFar, int totalNumber);
+        // constructor fields related to progress reporting
+        private bool reportProgress;
+        private ProgressReportSetup progressReportSetup;
+        private ProgressReportCallback progressReportCallback;
+        private Action progressReportTeardown;
+        // derived fields related to progress reporting
+        private int totLengthAlreadyParsed;
+        private int progressReportCheckpoints;
+        private int checkPointLength;
+        private int nextCheckPoint;
+        // fields related to cancellation of work
+        private BackgroundWorker readFilesWorker;
+        private CancellationTokenSource cts;
+        private bool cancellationRequested = false;
 
-		public JsonGrepper(JsonParser json_parser = null, 
-            int max_threads = 4)
+        /// <summary></summary>
+        /// <param name="jsonParser">the parser to use to parse API responses and grepped files</param>
+        /// <param name="reportProgress">whether to report progress</param>
+        /// <param name="progressReportCheckpoints">How many times to report progress</param>
+        /// <param name="progressReportSetup">Anything that must be done before progress reporting starts</param>
+        /// <param name="progressReportCallback">A function that is called at each progress report checkpoint</param>
+        /// <param name="progressReportTeardown">Anything that must be done after progress reporting is complete</param>
+		public JsonGrepper(JsonParser jsonParser = null, bool reportProgress = false, int progressReportCheckpoints = -1, ProgressReportSetup progressReportSetup = null, ProgressReportCallback progressReportCallback = null, Action progressReportTeardown = null)
 		{
-            this.max_threads_parsing = max_threads;
-            fname_strings = new Dictionary<string, string>();
-			fname_jsons = new JObject();
+            fnameStrings = new Dictionary<string, string>();
+			fnameJsons = new JObject();
             exceptions = new JObject();
-			if (json_parser == null)
+			if (jsonParser == null)
             {
-				this.json_parser = new JsonParser(LoggerLevel.JSON5, true);
+				this.jsonParser = new JsonParser(LoggerLevel.JSON5);
 			}
             else
             {
-				this.json_parser = json_parser;
+				this.jsonParser = jsonParser;
             }
-            this.json_parser.throwIfFatal = true;
-            this.json_parser.throwIfLogged = true;
+            this.jsonParser.throwIfFatal = true;
+            this.jsonParser.throwIfLogged = true;
             // security protocol addresses issue: https://learn.microsoft.com/en-us/answers/questions/173758/the-request-was-aborted-could-not-create-ssltls-se.html
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            // configure progress reporting
+            this.reportProgress = reportProgress;
+            this.progressReportCheckpoints = progressReportCheckpoints;
+            this.progressReportSetup = progressReportSetup;
+            this.progressReportCallback = progressReportCallback;
+            this.progressReportTeardown = progressReportTeardown;
+        }
+
+        private bool TryGetFilesToRead(string rootDir, bool recursive, out FileInfo[] allFiles, out long totalLengthToRead, out bool shouldReportProgress)
+        {
+            allFiles = null;
+            shouldReportProgress = false;
+            totalLengthToRead = -1;
+            DirectoryInfo dirInfo;
+            try
+            {
+                dirInfo = new DirectoryInfo(rootDir);
+            }
+            catch
+            {
+                return false;
+            }
+            SearchOption searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            allFiles = dirInfo.GetFiles("*", searchOption);
+            totalLengthToRead = allFiles.Sum(x => x.Length);
+            int nFiles = allFiles.Length;
+            shouldReportProgress = reportProgress
+                && (totalLengthToRead >= PROGRESS_REPORT_TEXT_MIN_TOT_LENGTH_IF_LT_MINCOUNT_FILES
+                    || (totalLengthToRead >= PROGRESS_REPORT_TEXT_MIN_TOT_LENGTH && nFiles >= PROGRESS_REPORT_FILE_READING_MIN_COUNT));
+            return true;
         }
 
         /// <summary>
-        /// Finds files that match the search_pattern (typically just ".json" files) in the directory root_dir
+        /// Finds files that match any of the searchPatterns (typically just ".json" files) in the directory rootDir
         /// and creates a dictionary mapping each found filename to that file's text.
         /// If recursive is true, this will recursively search all subdirectories for JSON files, not just the root.
         /// </summary>
-        /// <param name="root_dir"></param>
+        /// <param name="rootDir"></param>
         /// <param name="recursive"></param>
-        /// <param name="search_pattern"></param>
-        private void ReadJsonFiles(string root_dir, bool recursive, string search_pattern)
+        /// <param name="searchPattern"></param>
+        /// <exception cref="FormatException"></exception>
+        /// <exception cref="UnauthorizedAccessException"></exception>
+        /// <exception cref="System.Security.SecurityException"></exception>
+        /// <exception cref="IOException"></exception>
+        /// <exception cref="OutOfMemoryException"></exception>
+        private void ReadJsonFiles(FileInfo[] allFiles, bool shouldReportProgress, params string[] searchPatterns)
 		{
-            DirectoryInfo dir_info;
-            try
-            {
-                dir_info = new DirectoryInfo(root_dir);
-            }
-            catch { return; }
-			foreach (FileInfo file_info in dir_info.EnumerateFiles(search_pattern))
+            totalLengthToParse = 0;
+            int nFiles = allFiles.Length;
+            int checkPointLength = nFiles / progressReportCheckpoints;
+            int nextCheckPoint = checkPointLength;
+            Func<string, bool> globFunc = new Glob().ParseLinesSimple(string.Join("\n", searchPatterns));
+            for (int filesReadSoFar = 0; filesReadSoFar < nFiles; filesReadSoFar++)
 			{
-				string fname = file_info.FullName;
-                fname_strings[fname] = file_info.OpenText().ReadToEnd();
-			}
-			if (recursive)
-            {
-				// recursively search subdirectories for files that match the search pattern
-				foreach (DirectoryInfo subdir_info in dir_info.EnumerateDirectories())
+                if (cancellationRequested)
+                    return;
+                FileInfo fileInfo = allFiles[filesReadSoFar];
+				string fname = fileInfo.FullName;
+                if (globFunc(fname))
                 {
-					ReadJsonFiles(subdir_info.FullName, recursive, search_pattern);
-                }
-            }
-		}
-
-		/// <summary>
-		/// the task of a single thread in ParseJsonStringsThreaded:<br></br>
-		/// Loop through a subset of filenames/urls and tries to parse the JSON associated with each filename.
-		/// </summary>
-		/// <param name="fname_strings"></param>
-		/// <param name="results"></param>
-		private static void ParseJsonStrings_Task(object[] assigned_fnames, 
-                                                  Dictionary<string, string> fname_strings, 
-                                                  Dictionary<string, JNode> fname_json_map,
-                                                  Dictionary<string, JNode> fname_exception_map,
-                                                  JsonParser json_parser)
-        {
-			foreach (object fnameobj in assigned_fnames)
-            {
-                string fname = (string)fnameobj;
-                string json_str = fname_strings[fname];
-                // need to make sure the key is formatted properly and doesn't contain any unescaped special chars
-                // by default Windows paths have '\\' as path sep so those need to be escaped
-                try
-                {
-                    lock (fname_json_map)
+                    using (var fp = fileInfo.OpenText())
                     {
-                        fname_json_map[JNode.StrToString(fname, false)] = json_parser.Parse(json_str);
+                        string text = fp.ReadToEnd();
+                        totalLengthToParse += text.Length;
+                        if (totalLengthToParse > MAX_COMBINED_LENGTH_TEXT_TO_PARSE)
+                        {
+                            // quit if there's too much text,
+                            // based on the expectation that the computer would run out of memory while attempting to parse everything.
+                            cancellationRequested = true;
+                            return;
+                        }
+                        fnameStrings[fname] = text;
                     }
                 }
-                catch (Exception ex)
+                if (shouldReportProgress && filesReadSoFar == nextCheckPoint)
                 {
-                    lock (fname_exception_map)
-                    {
-                        fname_exception_map[JNode.StrToString(fname, false)] = new JNode(ex.ToString(), Dtype.STR, 0);
-                    }
+                    nextCheckPoint = nextCheckPoint + checkPointLength > nFiles ? nFiles : nextCheckPoint + checkPointLength;
+                    progressReportCallback(filesReadSoFar, nFiles);
                 }
             }
-        }
-
-		/// <summary>
-		/// Takes a map of filenames/urls to strings,
-		/// and attempts to parse each string and add the fname-JNode pair to fname_jsons.<br></br>
-		/// Divides up the filenames between at most max_threads threads.
-		/// </summary>
-		private void ParseJsonStringsThreaded()
-        {
-			List<Thread> threads = new List<Thread>();
-			string[] fnames = fname_strings.Keys.ToArray();
-			Array.Sort(fnames);
-            foreach (object[] assigned_fnames in DivideObjectsBetweenThreads(fnames, max_threads_parsing))
-            {
-                // JsonParsers store position in the parsed string (ii) and line_num as instance variables.
-                // that means that if multiple threads share a JsonParser, you have race conditions associated with ii and line_num.
-                // For this reason, we need to give each thread a separate JsonParser.
-                Thread thread = new Thread(() => ParseJsonStrings_Task(assigned_fnames, fname_strings, fname_jsons.children, exceptions.children, json_parser.Copy()));
-				threads.Add(thread);
-				thread.Start();
-            }
-			foreach (Thread thread in threads)
-				thread.Join();
-            fname_strings.Clear(); // don't need the strings anymore, only the JSON
         }
 
         /// <summary>
-        /// for each file that matches search_pattern in root_dir
-        /// (and all subdirectories of root_dir if recursive is true)<br></br>
+        /// 
+        /// </summary>
+        /// <param name="fname"></param>
+        /// <param name="jsonStr"></param>
+        /// <param name="jsonParserTemplate"></param>
+        /// <param name="shouldReportProgress"></param>
+        /// <returns></returns>
+        /// <exception cref="OperationCanceledException"></exception>
+        private (string fname, JNode parsedOrError, bool error) ParseOrGetError(string fname, string jsonStr, JsonParser jsonParserTemplate, bool shouldReportProgress)
+        {
+#if !PARSER_PARALLEL // PLINQ handles cancellation if we are parallel
+            if (cts.IsCancellationRequested)
+                throw new OperationCanceledException();
+#endif
+            JNode parsedOrError;
+            bool error = false;
+            try
+            {
+                JsonParser parser = jsonParserTemplate.Copy();
+                parsedOrError = jsonParser.Parse(jsonStr);
+            }
+            catch (Exception ex)
+            {
+                error = true;
+                parsedOrError = new JNode(ex.ToString());
+            }
+            if (shouldReportProgress && !(progressReportCallback is null) && nextCheckPoint < totalLengthToParse)
+            {
+                // Update the progress bar if the next checkpoint has been reached, then advance the checkpoint.
+                // Otherwise, keep moving toward the next checkpoint.
+                int alreadyParsed = Interlocked.Add(ref totLengthAlreadyParsed, jsonStr.Length);
+                if (alreadyParsed >= nextCheckPoint)
+                {
+                    progressReportCallback(alreadyParsed, totalLengthToParse);
+                    int newNextCheckPoint = alreadyParsed + checkPointLength;
+                    newNextCheckPoint = newNextCheckPoint > totalLengthToParse ? totalLengthToParse : newNextCheckPoint;
+                    Interlocked.Exchange(ref nextCheckPoint, newNextCheckPoint);
+                }
+            }
+            return (fname, parsedOrError, error);
+        }
+
+        /// <summary>
+        /// Takes a map of filenames/urls to strings,
+        /// and attempts to parse each string and add the fname-JNode pair to fnameJsons.
+        /// </summary>
+        /// <exception cref="AggregateException"></exception>
+        private async Task ParseJsonStrings()
+        {
+            bool shouldReportProgress = reportProgress
+                && (totalLengthToParse >= PROGRESS_REPORT_TEXT_MIN_TOT_LENGTH_IF_LT_MINCOUNT_FILES
+                    || (totalLengthToParse >= PROGRESS_REPORT_TEXT_MIN_TOT_LENGTH && fnameStrings.Count >= PROGRESS_REPORT_FILE_MIN_COUNT));
+            totLengthAlreadyParsed = 0;
+            checkPointLength = totalLengthToParse / progressReportCheckpoints;
+            var fnames = fnameStrings.Keys.ToArray();
+            if (shouldReportProgress)
+            {
+                progressReportSetup?.Invoke(totalLengthToParse, -1);
+                progressReportCallback(0, totalLengthToParse);
+            }
+            try
+            {
+                cts = new CancellationTokenSource();
+                (string, JNode, bool)[] results = await Task.Run(() =>
+                {
+                    return fnames
+                        .Select(fname => ParseOrGetError(fname, fnameStrings[fname], jsonParser, shouldReportProgress))
+#if PARSER_PARALLEL
+                        .AsParallel()
+                        .WithCancellation(cts.Token)
+#endif
+                        .OrderBy(x => x.fname)
+                        .ToArray();
+                }, cts.Token);
+                foreach ((string fname, JNode parsedOrError, bool error) in results)
+                {
+                    if (error)
+                        exceptions[fname] = parsedOrError;
+                    else
+                        fnameJsons[fname] = parsedOrError;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!(ex is OperationCanceledException))
+                    throw ex;
+            }
+            finally
+            {
+                if (shouldReportProgress)
+                {
+                    progressReportCallback(totalLengthToParse, totalLengthToParse);
+                    progressReportTeardown?.Invoke();
+                }
+                fnameStrings.Clear(); // don't need the strings anymore, only the JSON
+            }
+        }
+
+        /// <summary>
+        /// for each file that matches (any of the searchPatterns) in rootDir
+        /// (and all subdirectories of rootDir if recursive is true)<br></br>
         /// attempt to parse that file as JSON using this JsonGrepper's JsonParser.<br></br>
         /// For each file that contains valid JSON (according to the parser)
-        /// map that filename to the JNode produced by the parser in fname_jsons.
+        /// map that filename to the JNode produced by the parser in fnameJsons.
         /// </summary>
-        /// <param name="root_dir"></param>
+        /// <param name="rootDir"></param>
         /// <param name="recursive"></param>
-        /// <param name="search_pattern"></param>
-        /// <param name="max_threads"></param>
-        public void Grep(string root_dir, bool recursive = false, string search_pattern = "*.json")
+        /// <param name="searchPattern"></param>
+        /// <exception cref="AggregateException"></exception>
+        /// <exception cref="InvalidOperationException"></exception>
+        /// <exception cref="FormatException"></exception>
+        /// <exception cref="UnauthorizedAccessException"></exception>
+        /// <exception cref="System.Security.SecurityException"></exception>
+        /// <exception cref="IOException"></exception>
+        /// <exception cref="OutOfMemoryException"></exception>
+        public async Task Grep(string rootDir, bool recursive = false, params string[] searchPatterns)
         {
-            ReadJsonFiles(root_dir, recursive, search_pattern);
-            ParseJsonStringsThreaded();
+            if (!TryGetFilesToRead(rootDir, recursive, out FileInfo[] allFiles, out long totalLengthToRead, out bool shouldReportProgress))
+                return;
+            isBusy = true;
+            try
+            {
+                if (shouldReportProgress)
+                {
+                    int nFiles = allFiles.Length;
+                    progressReportSetup?.Invoke(nFiles, totalLengthToRead);
+                    progressReportCallback(0, nFiles);
+                    cancellationRequested = false;
+                    readFilesWorker = new BackgroundWorker();
+                    readFilesWorker.DoWork += new DoWorkEventHandler((_, __) => ReadJsonFiles(allFiles, shouldReportProgress, searchPatterns));
+                    readFilesWorker.WorkerSupportsCancellation = true;
+                    readFilesWorker.RunWorkerAsync();
+                    var waitForWorkerTask = new Task(() =>
+                    {
+                        while (readFilesWorker.IsBusy)
+                            Thread.Sleep(20);
+                    });
+                    waitForWorkerTask.Start();
+                    await Task.WhenAll(waitForWorkerTask);
+                    try
+                    {
+                        progressReportCallback(nFiles, nFiles);
+                        progressReportTeardown?.Invoke();
+                    }
+                    catch { }
+                    readFilesWorker.Dispose();
+                    readFilesWorker = null;
+                    if (cancellationRequested)
+                    {
+                        if (totalLengthToParse > MAX_COMBINED_LENGTH_TEXT_TO_PARSE)
+                        {
+                            Translator.ShowTranslatedMessageBox(
+                                "The total length of text ({0}) to be parsed exceeded the maximum length ({1})",
+                                "Too much text to parse",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error,
+                                2, totalLengthToParse, MAX_COMBINED_LENGTH_TEXT_TO_PARSE
+                            );
+                        }
+                        return;
+                    }
+                }
+                else ReadJsonFiles(allFiles, shouldReportProgress, searchPatterns);
+                cancellationRequested = false;
+                await ParseJsonStrings();
+            }
+            finally
+            {
+                isBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// Cancel a task that allows cancellation (this currently only includes reading of files in <see cref="ReadJsonFiles(string, bool, string[])"/>)<br></br>
+        /// If no such task is happening, this is a no-op.
+        /// </summary>
+        public void Cancel()
+        {
+            cancellationRequested = true;
+            try
+            {
+                if (!(readFilesWorker is null))
+                    readFilesWorker.CancelAsync();
+                else if (!(cts is null) && !cts.IsCancellationRequested)
+                    cts.Cancel();
+            }
+            catch { }
         }
 
         /// <summary>
         /// Asynchronously send API requests to several URLs
         /// For each URL where the request succeeds, try to parse the JSON returned.
-        /// If the JSON returned is valid, add the JSON to fname_jsons.
+        /// If the JSON returned is valid, add the JSON to fnameJsons.
         /// Populate a HashSet of all URLs for which the request succeeded
         /// and a dict mapping urls to exception strings
         /// </summary>
         /// <param name="urls"></param>
         /// <returns></returns>
+        /// <exception cref="AggregateException"></exception>
         public async Task GetJsonFromApis(string[] urls)
         {
-            var json_tasks = new Task[urls.Length];
-            for (int ii = 0; ii < urls.Length; ii++)
+            isBusy = true;
+            try
             {
-                // if (!fname_jsons.children.ContainsKey(url))
-                // it is probably better to allow duplication of labor,
-                // so that the user can get new JSON if something changed
-                json_tasks[ii] = GetJsonStringFromApiAsync(urls[ii]);
+                var jsonTasks = new Task[urls.Length];
+                for (int ii = 0; ii < urls.Length; ii++)
+                {
+                    // if (!fnameJsons.children.ContainsKey(url))
+                    // it is probably better to allow duplication of labor,
+                    // so that the user can get new JSON if something changed
+                    jsonTasks[ii] = GetJsonStringFromApiAsync(urls[ii]);
+                }
+                await Task.WhenAll(jsonTasks);
+                // now parse all the JSON strings that were downloaded
+                await ParseJsonStrings();
             }
-            await Task.WhenAll(json_tasks);
-            // now parse all the JSON strings that were downloaded
-            ParseJsonStringsThreaded();
+            finally
+            {
+                isBusy = false;
+            }
         }
 
         /// <summary>
 		/// Send an asynchronous request for JSON to an API.
-		/// If the request succeeds, add the JSON string to fname_strings
+		/// If the request succeeds, add the JSON string to fnameStrings
 		/// If the request raises an exception, add the exception string to exceptions
 		/// </summary>
 		/// <param name="url"></param>
@@ -189,15 +427,14 @@ namespace JSON_Tools.JSON_Tools
 		public async Task GetJsonStringFromApiAsync(string url)
         {
             InitializeHttpClient(httpClient);
-            string formatted_url = JNode.StrToString(url, false);
             try
             {
                 Task<string> stringTask = httpClient.GetStringAsync(url);
-                fname_strings[formatted_url] = await stringTask;
+                fnameStrings[url] = await stringTask;
             }
             catch (Exception ex)
             {
-                exceptions[formatted_url] = new JNode(ex.ToString(), Dtype.STR, 0);
+                exceptions[url] = new JNode(ex.ToString(), Dtype.STR, 0);
             }
         }
 
@@ -217,55 +454,10 @@ namespace JSON_Tools.JSON_Tools
         /// </summary>
         public void Reset()
         {
-            fname_strings.Clear();
-			fname_jsons.children.Clear();
-            exceptions.children.Clear();
-			//fname_lints.Clear();
-        }
-
-        /// <summary>
-        /// figure out how to divide up task_count tasks equally among num_threads threads
-        /// </summary>
-        /// <param name="task_count"></param>
-        /// <param name="num_threads"></param>
-        /// <returns></returns>
-        private static IEnumerable<int> TaskCountPerThread(int task_count, int num_threads)
-        {
-            int start = 0;
-            int things_per_thread = task_count / num_threads;
-            if (things_per_thread == 0)
-                things_per_thread = 1;
-            for (int count = 0; count < num_threads; count++)
-            {
-                int end = start + things_per_thread;
-                if (end > task_count // give fewer tasks to the final thread
-                    || count == num_threads - 1) // give all the remaining tasks to the final thread
-                    end = task_count;
-                if (start == end)
-                    break;
-                yield return end - start;
-                start = end;
-            }
-        }
-
-        /// <summary>
-        /// for each thread that gets any tasks, create a new array containing all the objects
-        /// that were assigned to that thread
-        /// </summary>
-        /// <param name="objs"></param>
-        /// <param name="num_threads"></param>
-        /// <returns></returns>
-        private static IEnumerable<object[]> DivideObjectsBetweenThreads(object[] objs, int num_threads)
-        {
-            int start = 0;
-            foreach (int count in TaskCountPerThread(objs.Length, num_threads))
-            {
-                object[] objs_this_thread = new object[count];
-                for (int jj = 0; jj < count; jj++)
-                    objs_this_thread[jj] = objs[jj + start];
-                start += count;
-                yield return objs_this_thread;
-            }
+            fnameStrings?.Clear();
+			fnameJsons?.children?.Clear();
+            exceptions?.children?.Clear();
+			//fnameLints.Clear();
         }
     }
 }

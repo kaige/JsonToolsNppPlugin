@@ -1,12 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Security.Cryptography;
-using System.Text;
 using System.Windows.Forms;
 using Kbg.NppPluginNET;
 using JSON_Tools.JSON_Tools;
@@ -16,58 +9,81 @@ namespace JSON_Tools.Forms
 {
     public partial class ErrorForm : Form
     {
-        public const int SLOW_RELOAD_THRESHOLD = 300; // completely arbitrary
-        public const int LINT_ROW_COUNT = 5000;
+        /// <summary>
+        /// if there are at least this many lints (completely arbitrary), warn the user 
+        /// </summary>
+        public const int SLOW_RELOAD_THRESHOLD = 300;
+        /// <summary>
+        /// there *cannot* be more than this many rows in the table, because otherwise it just gets insanely slow
+        /// </summary>
+        public const int LINT_MAX_ROW_COUNT = 5000;
         public string fname;
         public List<JsonLint> lints;
+        private bool isRepopulatingErrorGrid;
+        public IntPtr ptrNppTbData = IntPtr.Zero;
+        public IntPtr ptrTitleBuf = IntPtr.Zero;
 
         public ErrorForm(string fname, List<JsonLint> lints)
         {
             InitializeComponent();
+            NppFormHelper.RegisterFormIfModeless(this, false);
             Reload(fname, lints, true);
             FormStyle.ApplyStyle(this, Main.settings.use_npp_styling);
+            TranslateMenuItems();
         }
 
-        public bool SlowReloadExpected(IList<JsonLint> lints) { return lints.Count >= SLOW_RELOAD_THRESHOLD; }
+        /// <summary>
+        /// <see cref="Translator.TranslateForm(Form)"/> can't translate menu items, so unfortunately we need to do this manually
+        /// </summary>
+        public void TranslateMenuItems()
+        {
+            if (Translator.TryGetTranslationAtPath(new string[] { "forms", "ErrorForm", "controls" }, out JNode controlsNode)
+                && controlsNode is JObject controls)
+            {
+                if (controls.TryGetString("exportToJsonMenuItem", out string exportToJsonText))
+                    exportToJsonMenuItem.Text = exportToJsonText;
+                if (controls.TryGetString("refreshMenuItem", out string refreshText))
+                    refreshMenuItem.Text = refreshText;
+            }
+        }
+
+        public bool SlowReloadExpected(IList<JsonLint> lints) { return lints is null || lints.Count >= SLOW_RELOAD_THRESHOLD; }
 
         public void Reload(string fname, List<JsonLint> lints, bool onStartup = false)
         {
             bool wasBig = SlowReloadExpected(lints);
             if (wasBig && !onStartup)
             {
-                if (MessageBox.Show("Reloading this error form could take an extremely long time!\r\n" +
-                                    "You will get better results from closing it and reopening it from the plugin menu.\r\n" +
-                                    "Do you still want to reload?",
-                                    "Very slow error form reload expected",
-                                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning
-                    ) == DialogResult.No)
-                    return;
+                // for reasons beyond my comprehension, deleting the form and starting over is faster than refreshing when there are a lot of rows
                 Npp.notepad.HideDockingForm(this);
-                Hide();
+                Close();
+                Main.OpenErrorForm(fname, false);
+                return;
             }
+            isRepopulatingErrorGrid = true;
             this.fname = fname;
             this.lints = lints;
-            Text = "JSON errors in current file";
             ErrorGrid.Rows.Clear();
             int interval = 1;
+            int lintCount = lints is null ? 0 : lints.Count;
             // add a row that warns not all rows are shown
-            if (LINT_ROW_COUNT < lints.Count)
+            if (LINT_MAX_ROW_COUNT < lintCount)
             {
-                interval = lints.Count / LINT_ROW_COUNT;
+                interval = lintCount / LINT_MAX_ROW_COUNT;
                 var warningNotAllRowsShown = new DataGridViewRow();
                 warningNotAllRowsShown.CreateCells(ErrorGrid);
-                warningNotAllRowsShown.Cells[1].Value = $"Showing approximately {LINT_ROW_COUNT} of {lints.Count} rows";
+                warningNotAllRowsShown.Cells[1].Value = $"Showing approximately {LINT_MAX_ROW_COUNT} of {lintCount} rows";
                 ErrorGrid.Rows.Add(warningNotAllRowsShown);
             }
             int ii = 0;
             int cycler = 0;
-            while (ii < lints.Count)
+            while (ii < lintCount)
             {
                 var lint = lints[ii];
                 var row = new DataGridViewRow();
                 row.CreateCells(ErrorGrid);
                 row.Cells[0].Value = lint.severity;
-                row.Cells[1].Value = lint.message;
+                row.Cells[1].Value = lint.TranslateMessageIfDesired(true);
                 row.Cells[2].Value = lint.pos;
                 ErrorGrid.Rows.Add(row);
                 if (interval == 1)
@@ -81,12 +97,15 @@ namespace JSON_Tools.Forms
                     cycler++;
                 }
             }
+            isRepopulatingErrorGrid = false;
             if (wasBig)
                 Npp.notepad.ShowDockingForm(this);
         }
 
         private void ErrorGrid_CellEnter(object sender, DataGridViewCellEventArgs e)
         {
+            if (isRepopulatingErrorGrid)
+                return;
             int rowIndex = e.RowIndex;
             if (!IsValidRowIndex(rowIndex))
                 return;
@@ -103,7 +122,7 @@ namespace JSON_Tools.Forms
         {
             if (!(row.Cells[2].Value is int pos))
                 return;
-            Npp.editor.GotoPos(pos);
+            Npp.editor.GoToLegalPos(pos);
             this.Focus();
         }
 
@@ -136,37 +155,102 @@ namespace JSON_Tools.Forms
             HandleCellOrRowClick(newRow); // move to location of error
         }
 
-        private void ErrorForm_KeyDown(object sender, KeyEventArgs e)
+        /// <summary>
+        /// right-clicking the grid shows a drop-down where the user can choose to refresh the form or export the lints as JSON.
+        /// </summary>
+        private void ErrorForm_RightClick(object sender, MouseEventArgs e)
         {
-            if (e.KeyCode == Keys.Escape)
+            if (e.Button == MouseButtons.Right)
             {
-                e.Handled = true;
-                Npp.editor.GrabFocus();
+                errorGridRightClickStrip.Show(MousePosition);
+            }
+        }
+
+        private void RefreshMenuItem_Click(object sender, EventArgs e)
+        {
+            Npp.notepad.HideDockingForm(this);
+            Main.OpenErrorForm(Npp.notepad.GetCurrentFilePath(), false);
+        }
+
+        private void ExportLintsToJsonMenuItem_Click(object sender, EventArgs e)
+        {
+            int lintCount = lints == null ? 0 : lints.Count;
+            if (lintCount == 0)
+            {
+                Translator.ShowTranslatedMessageBox(
+                    "No JSON syntax errors (at or below {0} level) for {1}",
+                    "No JSON syntax errors for this file",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information,
+                    2, Main.settings.logger_level, fname);
                 return;
             }
-            else if (e.KeyCode == Keys.Enter)
+            var lintArrChildren = new List<JNode>();
+            foreach (JsonLint lint in lints)
+            {
+                var lintObj = lint.ToJson(true);
+                lintArrChildren.Add(lintObj);
+            }
+            var lintArr = new JArray(0, lintArrChildren);
+            Main.PrettyPrintJsonInNewFile(lintArr);
+        }
+
+        /// <summary>
+        /// hitting enter re-parses the current file (and re-validates using JSON schema if it had been validated) refreshes<br></br>
+        /// Hitting escape moves focus to the Notepad++ editor<br></br>
+        /// hitting the first letter of any error description goes to that error description
+        /// </summary>
+        private void ErrorForm_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
             {
                 // refresh error form based on current contents of current file
                 e.Handled = true;
-                Main.TryParseJson();
+                Main.errorFormTriggeredParse = true;
+                // temporarily turn off offer_to_show_lint prompt, because the user obviously wants to see it
+                bool previousOfferToShowLint = Main.settings.offer_to_show_lint;
+                Main.settings.offer_to_show_lint = false;
+                Main.TryParseJson(preferPreviousDocumentType:true);
                 if (Main.TryGetInfoForFile(Main.activeFname, out JsonFileInfo info)
                     && info.lints != null)
-                    Reload(Main.activeFname, info.lints);
+                {
+                    if (info.filenameOfMostRecentValidatingSchema is null)
+                        Reload(Main.activeFname, info.lints);
+                    else
+                    {
+                        Main.ValidateJson(info.filenameOfMostRecentValidatingSchema, false);
+                        if (Main.TryGetInfoForFile(Main.activeFname, out info) && info.lints != null && info.statusBarSection != null && info.statusBarSection.Contains("fatal errors"))
+                            Reload(Main.activeFname, info.lints);
+                    }
+                }
+                Main.settings.offer_to_show_lint = previousOfferToShowLint;
+                Main.errorFormTriggeredParse = false;
                 return;
             }
-            var selRowIndex = ErrorGrid.SelectedCells[0].RowIndex;
+            else if (e.KeyCode == Keys.Escape)
+            {
+                Npp.editor.GrabFocus();
+                return;
+            }
+            var cells = ErrorGrid.SelectedCells;
+            if (cells.Count < 1)
+                return;
+            var selRowIndex = cells[0].RowIndex;
             if (!IsValidRowIndex(selRowIndex))
                 return;
-            if (e.KeyCode == Keys.Up && selRowIndex > 0) // move up
-                ChangeSelectedRow(selRowIndex, selRowIndex - 1);
-            else if (e.KeyCode == Keys.Down && selRowIndex < ErrorGrid.RowCount - 1)
-                ChangeSelectedRow(selRowIndex, selRowIndex + 1); // move down
+            if (e.KeyCode == Keys.Up) // move up (unless on first row)
+            {
+                if (selRowIndex > 0)
+                    ChangeSelectedRow(selRowIndex, selRowIndex - 1);
+            }
+            else if (e.KeyCode == Keys.Down) // move down (unless on last row)
+            {
+                if (selRowIndex < ErrorGrid.RowCount - 1)
+                    ChangeSelectedRow(selRowIndex, selRowIndex + 1);
+            }
             // for most keys, seek first row after current row
             // whose description start with that key's char
             else if (e.KeyValue >= ' ' && e.KeyValue <= 126)
             {
-                if (ErrorGrid.SelectedCells.Count == 0)
-                    return;
                 char startChar = (char)e.KeyValue;
                 if (!SearchForErrorStartingWithChar(startChar, selRowIndex + 1, ErrorGrid.RowCount, selRowIndex))
                 {

@@ -1,7 +1,9 @@
 ﻿/*
 A test runner for all of this package.
 */
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using JSON_Tools.Utils;
 using Kbg.NppPluginNET;
@@ -10,234 +12,195 @@ namespace JSON_Tools.Tests
 {
     public class TestRunner
     {
+        private const string fuzzTestName = "RemesPath produces sane outputs on randomly generated queries";
+
         public static async Task RunAll()
         {
             Npp.notepad.FileNew();
             string header = $"Test results for JsonTools v{Npp.AssemblyVersionString()} on Notepad++ {Npp.nppVersionStr}\r\nNOTE: Ctrl-F (regular expressions *on*) for \"Failed [1-9]\\d*\" to find all failed tests";
             Npp.AddLine(header);
 
-            var failures = new List<string>();
-
-            Npp.AddLine(@"=========================
-Testing JNode Copy method
-=========================
-");
-            if (JsonParserTester.TestJNodeCopy())
-                failures.Add("JNode copy");
-
-            Npp.AddLine(@"=========================
-Testing JSON parser
-=========================
-");
-            if (JsonParserTester.Test())
-                failures.Add("JSON parser");
-
-            Npp.AddLine(@"=========================
-Testing if JSON parser throws errors on bad inputs
-=========================
-");
-            if (JsonParserTester.TestThrowsWhenAppropriate())
-                failures.Add("JSON parser throws errors on bad inputs");
-
-            Npp.AddLine(@"=========================
-Testing JSON parser advanced options (javascript comments, dates, datetimes, singlequoted strings)
-=========================
-");
-            if (JsonParserTester.TestSpecialParserSettings())
-                failures.Add("JSON parser advanced options");
-
-            Npp.AddLine(@"=========================
-Testing JSON parser's linter functionality
-=========================
-");
-            if (JsonParserTester.TestLinter())
-                failures.Add("JSON parser's linter");
-
-            Npp.AddLine(@"=========================
-Testing JSON Lines parser
-=========================
-");
-            if (JsonParserTester.TestJsonLines())
-                failures.Add("JSON lines");
-
-            Npp.AddLine(@"=========================
-Testing that parsing of numbers does not depend on current culture
-=========================
-");
-            if (JsonParserTester.TestCultureIssues())
-                failures.Add("parsing of numbers does not depend on current culture");
-
-            Npp.AddLine(@"=========================
-Testing YAML dumper
-=========================
-");
-            if (YamlDumperTester.Test())
-                failures.Add("YAML dumper");
-
-            Npp.AddLine(@"=========================
-Testing slice extension
-=========================
-");
-            if (SliceTester.Test())
-                failures.Add("slice extension");
-
-            Npp.AddLine(@"=========================
-Testing Least Recently Used (LRU) cache implementation
-=========================
-");
-            if (LruCacheTests.Test())
-                failures.Add("(LRU) cache implementation");
-
-            Npp.AddLine(@"=========================
-Testing RemesPath parser and compiler
-=========================
-");
-            if (RemesParserTester.Test())
-                failures.Add("RemesPath parser");
-
-            Npp.AddLine(@"=========================
-Testing that RemesPath throws errors on bad inputs
-=========================
-");
-            if (RemesPathThrowsWhenAppropriateTester.Test())
-                failures.Add("RemesPath throws errors on bad inputs");
-
-            Npp.AddLine(@"=========================
-Testing RemesPath assignment operations
-=========================
-");
-            if (RemesPathAssignmentTester.Test())
-                failures.Add("RemesPath assignment operations");
-
-            Npp.AddLine(@"=========================
-Testing that RemesPath produces sane outputs on randomly generated queries
-=========================
-");
-            if (RemesPathFuzzTester.Test(10000, 20))
-                failures.Add("randomly generated queries");
-
-            Npp.AddLine(@"=========================
-Testing multi-statement queries in RemesPath
-=========================
-");
-            if (RemesPathComplexQueryTester.Test())
-                failures.Add("multi-statement queries");
-
-            Npp.AddLine(@"=========================
-Testing JsonSchema generator
-=========================
-");
-            if (JsonSchemaMakerTester.Test())
-                failures.Add("JsonSchema generator");
-
-            Npp.AddLine(@"=========================
-Testing JsonSchema validator
-=========================
-");
-            if (JsonSchemaValidatorTester.Test())
-                failures.Add("JsonSchema validator");
-
-            Npp.AddLine(@"=========================
-Testing JSON tabularizer
-=========================
-");
-            if (JsonTabularizerTester.Test())
-                failures.Add("JSON tabularizer");
-
-            if (Npp.nppVersionAtLeast8)
+            string bigRandomFname = Path.Combine(Npp.pluginDllDirectory, "testfiles", "big_random.json");
+            var tests = new (Func<bool> tester, string name, bool onlyIfNpp8Plus, bool onlyIfNpp8p5p5Plus)[]
             {
-                // Notepad++ versions less than 8 (or something around 8)
-                // don't have separate plugin folders for each plugin, so the tests that involve reading files
-                // will cause the plugin to crash
-                Npp.AddLine(@"=========================
-Testing JSON grepper's file reading ability
-=========================
-");
-                if (JsonGrepperTester.TestFnames())
-                    failures.Add("JSON grepper's file reading");
+                (JsonParserTester.TestJNodeCopy, "JNode Copy method", false, false),
+                (JsonParserTester.Test, "JSON parser", false, false),
+                (JsonParserTester.TestThrowsWhenAppropriate, "if JSON parser throws errors on bad inputs", false, false),
+                (JsonParserTester.TestSpecialParserSettings, "JSON parser advanced options", false, false),
+                (JsonParserTester.TestLinter, "JSON parser's linter", false, false),
+                (JsonParserTester.TestJsonLines, "JSON Lines parser", false, false),
+                (JsonParserTester.TestCultureIssues, "parsing of numbers does not depend on current culture", false, false),
+                (JsonParserTester.TestTryParseNumber, "JsonParser.TryParseNumber method", false, false),
 
-                Npp.AddLine(@"=========================
-Testing JSON grepper's API request tool
-=========================
-");
-                if (Main.settings.skip_api_request_tests)
-                {
-                    Npp.AddLine("skipped tests because settings.skip_api_request_tests was set to true");
-                }
-                else
-                {
-                    if (await JsonGrepperTester.TestApiRequester())
-                        failures.Add("JSON grepper's API request tool");
-                }
+                (YamlDumperTester.Test, "YAML dumper", false, false),
+                
+                (SliceTester.Test, "slice extension", false, false),
+                
+                (LruCacheTests.Test, "Least Recently Used (LRU) cache implementation", false, false),
+                
+                (RemesParserTester.Test, "RemesPath parser and compiler", false, false),
+                (RemesPathThrowsWhenAppropriateTester.Test, "RemesPath throws errors on bad inputs", false, false),
+                (RemesPathAssignmentTester.Test, "RemesPath assignment operations", false, false),
+                (() => RemesPathFuzzTester.Test(3750, 16), fuzzTestName, false, false),
+                (RemesPathComplexQueryTester.Test, "multi-statement queries in RemesPath", false, false),
+                
+                (JsonSchemaMakerTester.Test, "JsonSchema generator", false, false),
+                (JsonSchemaValidatorTester.Test, "JsonSchema validator", false, false),
+                
+                (JsonTabularizerTester.Test, "JSON tabularizer", false, false),
 
-                Npp.AddLine(@"=========================
-Testing generation of random JSON from schema
-=========================
-");
-                if (RandomJsonTests.TestRandomJson())
-                    failures.Add("random JSON from schema");
+                (CsvSnifferTests.Test, "CSV sniffer", false, false),
 
-                Npp.AddLine(@"=========================
-Testing conversion of JSON to DSON (see https://dogeon.xyz/)
-=========================
-");
-                if (DsonTester.TestDump())
-                    failures.Add("DSON");
+                (GlobTester.TestParseLinesSimple, "Glob syntax parser", false, false),
 
-                Npp.AddLine(@"=========================
-Testing JNode PathToPosition method
-=========================
-");
-                if (FormatPathTester.Test())
-                    failures.Add("PathToPosition");
-
-                if (Npp.nppVersionAtLeast8p5p5)
-                {
-                    // the UI tests consistently cause NPP to hang on anything older than 8.5.5
-                    // and I really don't feel like trying to learn why
-                    Npp.AddLine(@"=========================
-Performing UI tests by faking user actions
-=========================
-");
-                    if (UserInterfaceTester.Test())
-                        failures.Add("UI tests");
-                }
-                else
-                    Npp.AddLine($"Skipping UI tests because they are very slow for Notepad++ versions older than v8.5.5");
-
-                Npp.AddLine(@"=========================
-Performance tests for JsonParser
-=========================
-");
-                // use an absolute path to the location of this file in your repo
-                string big_random_fname = @"plugins\JsonTools\testfiles\big_random.json";
-                Benchmarker.BenchmarkParserAndRemesPath(new string[][] {
-                    new string[] { "@[@[:].a * @[:].t < @[:].e]", "float arithmetic" },
-                    new string[] { "@[@[:].z =~ `(?i)[a-z]{5}`]", "string operations" },
-                    new string[] { "@..*", "basic recursive search" },
-                },
-                big_random_fname, 32, 64);
-
-                Npp.AddLine(@"=========================
-Performance tests for JSON compression and pretty-printing
-=========================
-");
-                Benchmarker.BenchmarkJNodeToString(64, big_random_fname);
-
-                Npp.AddLine($@"=========================
-Performance tests for JsonSchemaValidator and random JSON creation
-=========================
-");
-                Benchmarker.BenchmarkRandomJsonAndSchemaValidation(64);
-
+                (RandomStringFromRegexTests.Test, "Random string from regex", false, false),
+                
+                // tests that require reading files (skip on Notepad++ earlier than v8)
+                (RandomJsonTests.TestRandomJson, "generation of random JSON from schema", true, false),
+                (DsonTester.TestDump, "conversion of JSON to DSON (see https://dogeon.xyz/)", true, false),
+                (FormatPathTester.Test, "JNode PathToPosition method", true, false),
+                (IniFileParserTests.Test, "INI file parser", true, false),
+                
+                (UserInterfaceTester.Test, "UI tests", true, false),
+                
                 //because Visual Studio runs a whole bunch of other things in the background
                 //     when I build my project, the benchmarking suite
                 //     makes my code seem way slower than it actually is when it's running unhindered.
                 //     * *To see how fast the code actually is, you need to run the executable outside of Visual Studio.**
-            }
-            else
-                Npp.AddLine("Skipping UI tests and all tests that would involve reading a file, because they would cause Notepad++ versions older than v8 to crash");
+                (() => Benchmarker.BenchmarkParserAndRemesPath(
+                    new string[][] {
+                        new string[] { "@[@[:].a * @[:].t < @[:].e]", "float arithmetic"
+                        },
+                        new string[] { "@[@[:].z =~ `(?i)[a-z]{5}`]", "string operations"
+                        },
+                        new string[] { "@..*", "basic recursive search"
+                        },
+                        new string[] { "group_by(@, s).*{\r\n" +
+                                       "    Hmax: max((@[:].H)..*[is_num(@)][abs(@) < Infinity]),\r\n" +
+                                       "    min_N: min((@[:].N)..*[is_num(@)][abs(@) < Infinity])\r\n" +
+                                       "}",
+                            "group_by, projections and aggregations"
+                        },
+                        new string[]{ "var qmask = @[:].q;\r\n" +
+                                      "var nmax_q = max(@[qmask].n);\r\n" +
+                                      "var nmax_notq = max(@[not qmask].n);\r\n" +
+                                      "ifelse(nmax_q > nmax_notq, `when q=true, nmax = ` + str(nmax_q), `when q=false, nmax= ` + str(nmax_notq))",
+                            "variable assignments and simple aggregations"
+                        },
+                        new string[]{ "var X = X;\r\n" +
+                                      "var onetwo = j`[1, 2]`;\r\n" +
+                                      "@[:]->at(@, X)->at(@, onetwo)",
+                            "references to compile-time constant variables"
+                        },
+                        new string[]{ "var X = @->`X`;\r\n" +
+                                      "var onetwo = @{1, 2};\r\n" +
+                                      "@[:]->at(@, X)->at(@, onetwo)",
+                            "references to variables that are not compile-time constants"
+                        },
+                        new string[]{"@[:].z = s_sub(@, g, B)", "simple string mutations"
+                        },
+                        new string[]{"@[:].x = ifelse(@ < 0.5, @ + 3, @ - 3)", "simple number mutations"
+                        },
+                        new string[]{"var xhalf = @[:].x < 0.5;\r\n" +
+                                    "for lx = zip(@[:].l, xhalf);\r\n" +
+                                    "    lx[0] = ifelse(lx[1], foo, bar);\r\n" +
+                                    "end for;",
+                            "mutations with a for loop"}
+                    },
+                    bigRandomFname, 32, 40
+                    ), 
+                    "JsonParser performance",
+                    true, false
+                ),
+                (() => Benchmarker.BenchmarkParseAndFormatDoubles(32, 5000),
+                    "performance of parsing and dumping arrays of non-integer numbers",
+                    false, false),
+                //(() => Benchmarker.BenchmarkParsingAndLintingJsonWithErrors(30), "JsonParser performance and performance of JsonLint.message"),
+                (() => Benchmarker.BenchmarkJNodeToString(64, bigRandomFname),
+                    "performance of JSON compression and pretty-printing",
+                    true, false
+                ),
+                (() => Benchmarker.BenchmarkRandomJsonAndSchemaValidation(Path.Combine(Npp.pluginDllDirectory, "testfiles", "tweet_schema.json"), 25, false, 15),
+                    "performance of JsonSchemaValidator and random JSON creation",
+                    true, false
+                ),
+                (() => Benchmarker.BenchmarkRandomJsonAndSchemaValidation(null, 25, true, 120, 3, RandomJsonTests.kitchenSinkSchemaText),
+                    "performance of random JSON from schema with patterns and patternProperties",
+                    true, false
+                ),
+                (() => Benchmarker.BenchmarkRandomJsonAndSchemaValidation(null, 25, false, 120, 3, RandomJsonTests.kitchenSinkSchemaTextNoPatterns),
+                    "performance of random JSON from schema *ignoring* patterns and patternProperties",
+                    true, false
+                ),
+            };
 
+            var failures = new List<string>();
+            var skipped = new List<string>();
+            bool hasExplainedSkipLessThanNppV8 = false;
+
+            foreach ((Func<bool> tester, string name, bool onlyIfNpp8Plus, bool onlyIfNpp8p5p5Plus) in tests)
+            {
+                if (onlyIfNpp8Plus && !Npp.nppVersionAtLeast8)
+                {
+                    // Notepad++ versions less than 8 (or something around 8)
+                    // don't have separate plugin folders for each plugin, so the tests that involve reading files
+                    // will cause the plugin to crash
+                    if (!hasExplainedSkipLessThanNppV8)
+                    {
+                        hasExplainedSkipLessThanNppV8 = true;
+                        Npp.AddLine("Skipping UI tests and all tests that would involve reading a file, because they would cause Notepad++ versions older than v8 to crash");
+                    }
+                    skipped.Add(name);
+                }
+                else if (Main.settings.skip_api_request_and_fuzz_tests && name == fuzzTestName)
+                {
+                    Npp.AddLine("\r\nskipped RemesPath fuzz tests because settings.skip_api_request_and_fuzz_tests was set to true");
+                    skipped.Add(name);
+                }
+                else
+                {
+                    Npp.AddLine($@"=========================
+Testing {name}
+=========================
+");
+                    if (tester())
+                        failures.Add(name);
+                }
+            }
+
+            // need to do these separately because they're async
+            string apiRequestTestName = "JSON grepper's API request tool";
+
+            var asyncTests = new (Func<Task<bool>> tester, string name, bool onlyIfNpp8Plus, bool onlyIfNpp8p5p5Plus)[]
+            {
+                (JsonGrepperTester.TestApiRequester, apiRequestTestName, true, false),
+                (JsonGrepperTester.TestFnames, "JSON grepper's file reading ability", true, false),
+            };
+
+            foreach ((Func<Task<bool>> tester, string name, bool onlyIfNpp8Plus, bool onlyIfNpp8p5p5Plus) in asyncTests)
+            {
+                if (onlyIfNpp8Plus && !Npp.nppVersionAtLeast8)
+                {
+                    skipped.Add(name);
+                }
+                else if (Main.settings.skip_api_request_and_fuzz_tests && name == apiRequestTestName)
+                {
+                    Npp.AddLine("\r\nskipped API request tests because settings.skip_api_request_and_fuzz_tests was set to true");
+                    skipped.Add(name);
+                }
+                else
+                {
+                    Npp.AddLine($@"=========================
+Testing {name}
+=========================
+");
+                    if (await tester())
+                        failures.Add(name);
+                }
+            }
+
+            if (skipped.Count > 0)
+                Npp.editor.InsertText(header.Length + 2, "Tests skipped: " + string.Join(", ", skipped) + "\r\n");
             Npp.editor.InsertText(header.Length + 2, "Tests failed: " + string.Join(", ", failures) + "\r\n");
         }
     }

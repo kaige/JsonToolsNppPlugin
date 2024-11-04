@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
 using JSON_Tools.PluginInfrastructure;
+using JSON_Tools.Utils;
 
 namespace Kbg.NppPluginNET.PluginInfrastructure
 {
@@ -29,6 +30,31 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
 		string[] GetOpenFileNames();
 		void SetCurrentBufferInternalName(string newName);
 		void SetStatusBarSection(string message, StatusBarSection section);
+		/// <summary>
+		/// Register a modeless form (i.e., a form that doesn't block the parent application until closed)<br></br>
+		/// with Notepad++ using NPPM_MODELESSDIALOG<br></br>
+		/// If you don't do this, Notepad++ may intercept some keystrokes in unintended ways.
+		/// </summary>
+		/// <param name="formHandle">the Handle attribute of a Windows form</param>
+		void AddModelessDialog(IntPtr formHandle);
+		/// <summary>
+		/// unregister a modelesss form that was registered with AddModelessDialog.<br></br>
+		/// This MUST be called in the Dispose method of the form, BEFORE the components of the form are disposed.
+		/// </summary>
+		/// <param name="formHandle">the Handle attribute of a Windows form</param>
+		void RemoveModelessDialog(IntPtr formHandle);
+
+        /// <summary>
+        /// Introduced in Notepad++ 8.5.6.<br></br>
+        /// NPPM_ALLOCATEINDICATOR: allocate one or more unused indicator IDs,
+        /// which can then be assigned styles and used to style regions of text.<br></br>
+        /// returns false and sets indicators to null if numberOfIndicators is less than 1, or if the requested number of indicators could not be allocated.<br></br>
+        /// Otherwise, returns true, and sets indicators to an array of numberOfIndicators indicator IDs.<br></br>
+        /// See https://www.scintilla.org/ScintillaDoc.html#Indicators for more info on the indicator API.
+        /// </summary>
+        /// <param name="numberOfIndicators">number of consecutive indicator IDs to allocate</param>
+        /// <returns></returns>
+        bool AllocateIndicators(int numberOfIndicators, out int[] indicators);
 
     }
 
@@ -145,16 +171,16 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
 
 		public void HideDockingForm(System.Windows.Forms.Form form)
 		{
-			Win32.SendMessage(PluginBase.nppData._nppHandle,
+			form.Invoke(new Action(() => Win32.SendMessage(PluginBase.nppData._nppHandle,
 					(uint)(NppMsg.NPPM_DMMHIDE),
-					0, form.Handle);
+					0, form.Handle)));
 		}
 
 		public void ShowDockingForm(System.Windows.Forms.Form form)
 		{
-			Win32.SendMessage(PluginBase.nppData._nppHandle,
+			form.Invoke(new Action(() => Win32.SendMessage(PluginBase.nppData._nppHandle,
 					(uint)(NppMsg.NPPM_DMMSHOW),
-					0, form.Handle);
+					0, form.Handle)));
 		}
 
 		public Color GetDefaultForegroundColor()
@@ -191,6 +217,8 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
 			int version = Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_GETNPPVERSION, 0, 0).ToInt32();
 			int major = version >> 16;
 			int minor = Math.DivRem(version & 0xffff, 10, out int bugfix);
+			if (minor == 0)
+				(bugfix, minor) = (minor, bugfix);
 			return new int[] { major, minor, bugfix };
         }
 
@@ -206,6 +234,16 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
             return null;
         }
 
+		public void AddModelessDialog(IntPtr formHandle)
+		{
+			Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_MODELESSDIALOG, IntPtr.Zero, formHandle);
+		}
+
+        public void RemoveModelessDialog(IntPtr formHandle)
+        {
+            Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_MODELESSDIALOG, new IntPtr(1), formHandle);
+        }
+
         /// <summary>
         /// Changes the apparent name of the current buffer. Does not work on files that have already been saved to disk.<br></br>
         /// </summary>
@@ -213,12 +251,22 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
         public void SetCurrentBufferInternalName(string newName)
 		{
 			IntPtr bufferId = Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_GETCURRENTBUFFERID, 0, 0);
-			// we need to manually do the operations that would normally happen automatically in response to a NPPN_FILEBEFORERENAME and subsequent NPPN_FILERENAMED
-			// because those notifications are not sent out when a buffer's internal name is changed
-			Main.FileBeforeRename(bufferId);
-			// change the current file extension to ".dson" (this command only works for unsaved files, but of course we just made an unsaved file)
-            Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_INTERNAL_SETFILENAME, bufferId, newName);
-			Main.FileRenamed(bufferId);
+			int nppMajor = Npp.nppVersion[0], nppMinor = Npp.nppVersion[1], nppBugfix = Npp.nppVersion[2];
+			bool atLeastNpp8p6p9 = nppMajor > 8 || (nppMajor == 8 && (nppMinor > 6 || (nppMinor == 6 && nppBugfix >= 9)));
+			if (atLeastNpp8p6p9)
+			{
+				// NPPM_SETUNTITLEDNAME doesn't need the hack (shown below) that we needed to do for NPPM_INTERNAL_SETFILENAME
+				Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_SETUNTITLEDNAME, bufferId, newName);
+			}
+			else
+			{
+				// we need to manually do the operations that would normally happen automatically
+				//     in response to a NPPN_FILEBEFORERENAME and subsequent NPPN_FILERENAMED
+				//     because those notifications are not sent out when a buffer's internal name is changed using NPPM_INTERNAL_SETFILENAME
+				Main.FileBeforeRename(bufferId);
+				Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_INTERNAL_SETFILENAME, bufferId, newName);
+				Main.FileRenamed(bufferId);
+			}
         }
 
 		/// <summary>
@@ -231,7 +279,22 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
 		{
 			Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_SETSTATUSBAR, (int)section, message);
 		}
-	}
+
+        public unsafe bool AllocateIndicators(int numberOfIndicators, out int[] indicators)
+        {
+            indicators = null;
+            if (numberOfIndicators < 1)
+                return false;
+            indicators = new int[numberOfIndicators];
+            fixed (int* indicatorsPtr = indicators)
+            {
+                IntPtr success = Win32.SendMessage(PluginBase.nppData._nppHandle, (uint)NppMsg.NPPM_ALLOCATEINDICATOR, (IntPtr)numberOfIndicators, (IntPtr)indicatorsPtr);
+                for (int ii = 1; ii < numberOfIndicators; ii++)
+                    indicators[ii] = indicators[ii - 1] + 1;
+                return success != IntPtr.Zero;
+            }
+        }
+    }
 
 	/// <summary>
 	/// This class holds helpers for sending messages defined in the Resource_h.cs file. It is at the moment

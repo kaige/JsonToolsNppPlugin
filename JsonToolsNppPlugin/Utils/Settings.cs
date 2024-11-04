@@ -29,12 +29,8 @@ namespace JSON_Tools.Utils
         public LoggerLevel logger_level { get; set; }
 
         [Description("When the document is parsed, show a prompt to see syntax errors in the document."),
-            Category("JSON Parser"), DefaultValue(false)]
+            Category("JSON Parser"), DefaultValue(true)]
         public bool offer_to_show_lint { get; set; }
-
-        [Description("Parse \"yyyy-mm-dd dates\" and \"yyyy-MM-dd hh:mm:ss.sss\" datetimes as the appropriate type."),
-            Category("JSON Parser"), DefaultValue(false)]
-        public bool allow_datetimes { get; set; }
         #endregion
         #region PERFORMANCE
         [Description("Files larger than this number of megabytes have the following slow actions DISABLED by default:\r\n" +
@@ -42,11 +38,6 @@ namespace JSON_Tools.Utils
             "* Automatic parsing of the file on opening and approximately 2 seconds after every edit."),
             Category("Performance"), DefaultValue(4d)]
         public double max_file_size_MB_slow_actions { get; set; }
-
-        [Description("Maximum number of separate JSON selections to track changes for.\r\n" +
-                     "Files with more JSON selections can be handled, but changes outside of JSON tools will cause all selections to be forgotten"),
-            Category("Performance"), DefaultValue(1000)]
-        public int max_tracked_json_selections { get; set; }
 
         [Description("Automatically validate .json, .jsonc, and .jsonl files every 2 seconds, except very large files"),
             Category("Performance"), DefaultValue(false)]
@@ -82,7 +73,7 @@ namespace JSON_Tools.Utils
         public bool minimal_whitespace_compression { get; set; }
 
         [Description("Sort the keys of objects alphabetically when pretty-printing or compressing"),
-            Category("JSON formatting"), DefaultValue(true)]
+            Category("JSON formatting"), DefaultValue(false)]
         public bool sort_keys { get; set; }
 
         [Description("How JSON is pretty printed.\r\n" +
@@ -111,18 +102,25 @@ namespace JSON_Tools.Utils
         public PrettyPrintStyle pretty_print_style { get; set; }
 
         [Description("When JSON is pretty-printed or compressed, any comments found when it was last parsed are included.\r\n" +
-                     "For logistical reasons, the user-selected pretty_print_style value is ignored if this is true, and Google style will always be used.\r\n" +
                      "When pretty-printing, each comment will have the same relative location to each JSON element as when it was parsed.\r\n" +
                      "When compressing, all comments will come at the beginning of the document."
                     ),
             Category("JSON formatting"), DefaultValue(false)]
         public bool remember_comments { get; set; }
+
+        [Description("Ask before pretty-printing JSON Lines documents, ignore requests to pretty-print, or pretty-print without asking?"),
+            Category("JSON formatting"), DefaultValue(AskUserWhetherToDoThing.ASK_BEFORE_DOING)]
+        public AskUserWhetherToDoThing ask_before_pretty_printing_json_lines { get; set; }
         #endregion
 
         #region MISCELLANEOUS
-        [Description("The style of key to use when getting the path or key/index of a node or line"),
+        [Description("The style of key to use when getting the path or key/index of a node or line.\r\nSee the documentation (https://github.com/molsonkiko/JsonToolsNppPlugin/blob/main/docs/README.md#key_style-and-path_separator-settings) for an explanation of each type.\r\nThis setting is IGNORED when path_separator is NOT the default \"\\u0001\"."),
             Category("Miscellaneous"), DefaultValue(KeyStyle.RemesPath)]
         public KeyStyle key_style { get; set; }
+
+        [Description("The separator to use when formatting a path. This setting is IGNORED when it is set to \"\\u0001\" (the default).\r\nThis MUST have exactly one character, which CANNOT be any of the characters in the following JSON string: \"\\\"0123456789\"\r\nThe algorithm for formatting an object key or array index is as follows:\r\n===========\r\nif the key is an array index:\r\n    format it as plaintext (for example, index 10 becomes \"$10\" if \"$\" was the path_separator)\r\nif the key contains the path_separator:\r\n    format it as a JSON string (for example, key \"foo\" would be formatted as \"/foo\" if \"/\" was the path_separator)\r\nelse if the key starts with (_ or a-z or A-Z) and all its other characters are (_ or 0-9 or a-z or A-Z):\r\n    format it as plain text (for example, key \"_foo\" becomes \"/_foo\" if \"/\" was the path_separator, but \"_\\\"_foo\\\"\" if \"_\" was the path_separator)\r\nelse:\r\n    format it as a JSON string (for example, the key \"a b\" would be formatted as \"/\\\"a b\\\"\" if the path_separator was \"/\" even though it doesn't contain the path_separator)"),
+            Category("Miscellaneous"), DefaultValue("\"\\u0001\"")]
+        public string path_separator { get; set; }
 
         [Description("When selecting every JSON in the file, start trying to parse only at these characters.\r\n" +
                      "Only JSON valid according to the NAN_INF logger_level is tolerated.\r\n" +
@@ -131,25 +129,37 @@ namespace JSON_Tools.Utils
             Category("Miscellaneous"), DefaultValue("\"[{")]
         public string try_parse_start_chars { get; set; }
 
-        [Description("When running tests, skip the tests that send requests to APIs"),
+        [Description("When running tests, skip the tests that send requests to APIs and the RemesPath fuzz tests"),
             Category("Miscellaneous"), DefaultValue(true)]
-        public bool skip_api_request_tests { get; set; }
+        public bool skip_api_request_and_fuzz_tests { get; set; }
 
         [Description("Which type of newline to use for generated CSV files."),
             Category("Miscellaneous"), DefaultValue(EndOfLine.LF)]
         public EndOfLine csv_newline { get; set; }
-        #endregion
 
-        #region GREP_API_SETTINGS
-        [Description("How many threads to use for parsing JSON files obtained by JsonGrep and API requester"),
-            Category("Grep and API requests"), DefaultValue(4)]
-        public int max_threads_parsing { get; set; }
+        [Description("Specify one of these chars for each toolbar icon you want to show, in the order you want:\r\n" +
+                    "('t' = tree view, 'c' = compress, 'p' = pretty-print, 'o' = path to current position)\r\n" +
+                    "This setting will take effect the next time you start Notepad++.\r\n" +
+                    "If you want there to be NO toolbar icons, enter a character that does not represent an icon; do NOT leave this field empty."),
+            Category("Miscellaneous"), DefaultValue("tcpo")]
+        public string toolbar_icons { get; set; }
+
+        [Description("If this setting is true,\r\n" +
+            "when the regex search form is opened, or when the \"Parse as CSV?\" checkbox in that form is toggled on,\r\n" +
+            "JsonTools will attempt to guess whether the current document is a CSV or TSV file, and how many columns and what newline it has.\r\n" +
+            "The regex search form will take slightly longer to open if this is true."),
+            Category("Miscellaneous"), DefaultValue(false)]
+        public bool auto_try_guess_csv_delim_newline { get; set; }
         #endregion
 
         #region STYLING
-        [Description("Use the same colors as the editor window for the tree viewer?"),
+        [Description("Use the same colors as the editor window for the tree viewer and other JsonTools forms?"),
             Category("Styling"), DefaultValue(true)]
         public bool use_npp_styling { get; set; }
+
+        [Description("The font size (in points) for the tree viewer. For reference, the default value is 7.8."),
+            Category("Styling"), DefaultValue(7.8f)]
+        public float tree_view_font_size { get; set; }
         #endregion
 
         #region RANDOM_JSON_SETTINGS
@@ -164,6 +174,16 @@ namespace JSON_Tools.Utils
         [Description("Use extended ASCII characters (e.g., \x0b, \xf1) in strings?"),
             Category("Random JSON"), DefaultValue(false)]
         public bool extended_ascii_strings { get; set; }
+
+        [Description("Generate random strings that match the \"pattern\" keyword of string schemas, and random keys that match the \"patternProperties\" keyword of object schemas."),
+            Category("Random JSON"), DefaultValue(false)]
+        public bool generate_random_patterns { get; set; }
         #endregion
+
+        #region JSON_SCHEMA_SETTINGS
+        [Description("Maximum number of JSON Schema validation problems to log before the validator stops"),
+            Category("JSON Schema"), DefaultValue(64)]
+        public int max_schema_validation_problems { get; set; }
+        #endregion // JSON_SCHEMA_SETTINGS
     }
 }

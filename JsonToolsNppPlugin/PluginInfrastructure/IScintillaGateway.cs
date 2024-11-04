@@ -55,7 +55,7 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
         void ClearDocumentStyle();
 
         /// <summary>Returns the number of bytes in the document. (Scintilla feature 2006)</summary>
-        int GetLength();
+        long GetLength();
 
         /// <summary>Returns the character byte at the position. (Scintilla feature 2007)</summary>
         int GetCharAt(int pos);
@@ -143,6 +143,11 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
 
         /// <summary>Set caret to a position and ensure it is visible. (Scintilla feature 2025)</summary>
         void GotoPos(int caret);
+
+        /// <summary>
+        /// same as GotoPos, except that if caret is in the middle of a "\r\n", it goes before the '\r' 
+        /// </summary>
+        void GoToLegalPos(int caret);
 
         /// <summary>
         /// Set the selection anchor to a position. The anchor is the opposite
@@ -909,12 +914,12 @@ namespace Kbg.NppPluginNET.PluginInfrastructure
         unsafe void SetText(string text);
 
         /// <summary>
-        /// Retrieve all the text in the document.
+        /// Retrieve all the text in the document (or the first length chars of the document).
         /// Returns number of characters retrieved.
         /// Result is NUL-terminated.
         /// (Scintilla feature 2182)
         /// </summary>
-        unsafe string GetText(int length);
+        unsafe string GetText(int length = -1);
 
         /// <summary>Retrieve the number of characters in the document. (Scintilla feature 2183)</summary>
         int GetTextLength();

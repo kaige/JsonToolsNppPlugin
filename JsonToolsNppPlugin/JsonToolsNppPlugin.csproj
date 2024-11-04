@@ -8,7 +8,7 @@
     <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>NppPluginNET</RootNamespace>
+    <RootNamespace>JSON_Tools</RootNamespace>
     <AssemblyName>JsonTools</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <OldToolsVersion>3.5</OldToolsVersion>
@@ -97,6 +97,13 @@
     <Compile Include="Forms\JsonToCsvForm.Designer.cs">
       <DependentUpon>JsonToCsvForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="Forms\NppFormHelper.cs" />
+    <Compile Include="Forms\RegexSearchForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\RegexSearchForm.Designer.cs">
+      <DependentUpon>RegexSearchForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Forms\SortForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -109,6 +116,7 @@
     <Compile Include="Forms\TreeViewer.Designer.cs">
       <DependentUpon>TreeViewer.cs</DependentUpon>
     </Compile>
+    <Compile Include="JSONTools\CsvSniffer.cs" />
     <Compile Include="JSONTools\Dson.cs" />
     <Compile Include="PluginInfrastructure\ClikeStringArray.cs" />
     <Compile Include="PluginInfrastructure\DllExport\DllExportAttribute.cs" />
@@ -127,54 +135,6 @@
     <Compile Include="PluginInfrastructure\UnmanagedExports.cs" />
     <Compile Include="PluginInfrastructure\Win32.cs" />
     <Compile Include="PluginInfrastructure\resource_h.cs" />
-    <!-- <Compile Include="PluginInfrastructure\DllExport\DllExportAttribute.cs">
-      <Link>PluginInfrastructure\DllExport\DllExportAttribute.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\ClikeStringArray.cs">
-      <Link>PluginInfrastructure\ClikeStringArray.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\NotepadPPGateway.cs">
-      <Link>PluginInfrastructure\NotepadPPGateway.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\Preference_h.cs">
-      <Link>PluginInfrastructure\Preference_h.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\Resource_h.cs">
-      <Link>PluginInfrastructure\Resource_h.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\Win32.cs">
-      <Link>PluginInfrastructure\Win32.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\ScintillaGateway.cs">
-      <Link>PluginInfrastructure\ScintillaGateway.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\IScintillaGateway.cs">
-      <Link>PluginInfrastructure\IScintillaGateway.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\GatewayDomain.cs">
-      <Link>PluginInfrastructure\GatewayDomain.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\Docking_h.cs">
-      <Link>PluginInfrastructure\Docking_h.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\MenuCmdID_h.cs">
-      <Link>PluginInfrastructure\MenuCmdID_h.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\Msgs_h.cs">
-      <Link>PluginInfrastructure\Msgs_h.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\Scintilla_iface.cs">
-      <Link>PluginInfrastructure\Scintilla_iface.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\NppPluginNETBase.cs">
-      <Link>PluginInfrastructure\NppPluginNETBase.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\NppPluginNETHelper.cs">
-      <Link>PluginInfrastructure\NppPluginNETHelper.cs</Link>
-    </Compile>
-    <Compile Include="PluginInfrastructure\UnmanagedExports.cs">
-      <Link>PluginInfrastructure\UnmanagedExports.cs</Link>
-    </Compile> -->
     <!-- forms -->
     <!-- designers -->
     <Compile Include="Properties\Resources.Designer.cs">
@@ -182,6 +142,7 @@
     </Compile>
     <!-- other code -->
     <Compile Include="Main.cs" />
+    <Compile Include="JSONTools\IniFileParser.cs" />
     <Compile Include="JSONTools\JNode.cs" />
     <Compile Include="JSONTools\JsonGrepper.cs" />
     <Compile Include="JSONTools\JsonParser.cs" />
@@ -198,14 +159,18 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <Compile Include="Tests\Benchmarker.cs" />
+    <Compile Include="Tests\CsvSnifferTests.cs" />
+    <Compile Include="Tests\GlobTests.cs" />
+    <Compile Include="Tests\IniFileParserTests.cs" />
     <Compile Include="Tests\JsonGrepperTests.cs" />
     <Compile Include="Tests\JsonParserTests.cs" />
     <Compile Include="Tests\JsonSchemaTests.cs" />
     <Compile Include="Tests\JsonSchemaValidatorTests.cs" />
     <Compile Include="Tests\JsonTabularizerTests.cs" />
-    <Compile Include="Tests\FormatPathTester.cs" />
+    <Compile Include="Tests\FormatPathTests.cs" />
     <Compile Include="Tests\LruCacheTests.cs" />
     <Compile Include="Tests\RandomJsonTests.cs" />
+    <Compile Include="Tests\RandomStringFromRegexTests.cs" />
     <Compile Include="Tests\RemesPathTests.cs" />
     <Compile Include="Tests\UserInterfaceTests.cs" />
     <Compile Include="Tests\SliceTests.cs" />
@@ -213,14 +178,18 @@
     <Compile Include="Tests\TestRunner.cs" />
     <Compile Include="JSONTools\YamlDumper.cs" />
     <Compile Include="Tests\YamlDumperTests.cs" />
+    <Compile Include="Utils\CharExtensions.cs" />
     <Compile Include="Utils\FormStyle.cs" />
+    <Compile Include="Utils\Glob.cs" />
     <Compile Include="Utils\LruCache.cs" />
     <Compile Include="Utils\Npp.cs" />
     <Compile Include="Utils\NanInf.cs" />
+    <Compile Include="Utils\RandomStringFromRegex.cs" />
     <Compile Include="Utils\SelectionManager.cs" />
     <Compile Include="Utils\Settings.cs" />
     <Compile Include="Utils\ArrayExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Utils\Translator.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- references -->
@@ -249,6 +218,9 @@
     <EmbeddedResource Include="Forms\JsonToCsvForm.resx">
       <DependentUpon>JsonToCsvForm.cs</DependentUpon>
     </EmbeddedResource>
+    <EmbeddedResource Include="Forms\RegexSearchForm.resx">
+      <DependentUpon>RegexSearchForm.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="Forms\SortForm.resx">
       <DependentUpon>SortForm.cs</DependentUpon>
     </EmbeddedResource>
@@ -264,6 +236,11 @@
   <ItemGroup>
     <!-- icons and such -->
     <Content Include="Properties\star_bmp.bmp" />
+    <None Include="Resources\json tree toolbar darkmode.ico" />
+    <None Include="Resources\json pretty print toolbar darkmode.ico" />
+    <None Include="Resources\json path to position toolbar darkmode.ico" />
+    <None Include="Resources\json compress toolbar darkmode.ico" />
+    <None Include="Resources\json_compress_toolbar_darkmode.ico" />
     <None Include="Resources\json tree toolbar1.ico" />
     <None Include="Resources\json pretty print toolbar1.ico" />
     <None Include="Resources\json path to position toolbar1.ico" />
@@ -298,15 +275,20 @@
   <ItemGroup />
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <Import Project="$(MSBuildProjectDirectory)\PluginInfrastructure\DllExport\NppPlugin.DllExport.targets" />
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
-       Other similar extension points exist, see Microsoft.Common.targets.
-  <Target Name="BeforeBuild">
-  <Target Name="CopyTestFiles" BeforeTargets="Build">
+  <Target Name="CopyTranslation" AfterTargets="Build" DependsOnTargets="Build">
     <ItemGroup>
-        <TESTFILES Include="testfiles\**\*.*" />
+      <NPP32BIT Include="$(MSBuildProgramFiles32)\Notepad++\plugins\JsonTools" />
+      <NPP64BIT Include="$(ProgramW6432)\Notepad++\plugins\JsonTools" />
+      <TRANSLATION_ORIGIN Include="..\translation\*.json5" />
+      <TRANSLATION32 Include="$(MSBuildProgramFiles32)\Notepad++\plugins\JsonTools\translation" />
+      <TRANSLATION64 Include="$(ProgramW6432)\Notepad++\plugins\JsonTools\translation" />
     </ItemGroup>
-    <Copy SourceFiles="@(TESTFILES)" DestinationFolder="$(ProgramW6432)\Notepad++\plugins\JsonTools\%(RecursiveDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(TESTFILES)" DestinationFolder="$(MSBuildProgramFiles32)\Notepad++\plugins\JsonTools\%(RecursiveDir)" SkipUnchangedFiles="true" />
+    <MakeDir Directories="@(NPP64BIT)" Condition=" '$(Platform)' == 'x64' " />
+    <MakeDir Directories="@(NPP32BIT)" Condition=" '$(Platform)' == 'x86' " />
+    <!-- copy all translation files to NPP plugin dir's subdirectory -->
+    <MakeDir Directories="@(TRANSLATION64)" Condition=" '$(Platform)' == 'x64' " />
+    <MakeDir Directories="@(TRANSLATION32)" Condition=" '$(Platform)' == 'x86' " />
+    <Copy Condition=" '$(Platform)' == 'x64' " SourceFiles="@(TRANSLATION_ORIGIN)" DestinationFolder="@(TRANSLATION64)" SkipUnchangedFiles="true" />
+    <Copy Condition=" '$(Platform)' == 'x86' " SourceFiles="@(TRANSLATION_ORIGIN)" DestinationFolder="@(TRANSLATION32)" SkipUnchangedFiles="true" />
   </Target>
-  -->
 </Project>

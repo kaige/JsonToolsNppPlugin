@@ -1,4 +1,5 @@
-﻿using JSON_Tools.JSON_Tools;
+﻿using System;
+using System.Runtime.InteropServices;
 
 namespace JSON_Tools.Forms
 {
@@ -26,8 +27,19 @@ namespace JSON_Tools.Forms
                 findReplaceForm.Dispose();
                 findReplaceForm = null;
             }
+            if (ptrTitleBuf != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(ptrTitleBuf);
+                ptrTitleBuf = IntPtr.Zero;
+            }
+            if (ptrNppTbData != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(ptrNppTbData);
+                ptrNppTbData = IntPtr.Zero;
+            }
             if (disposing && (components != null))
             {
+                NppFormHelper.UnregisterFormIfModeless(this, false);
                 components.Dispose();
             }
             base.Dispose(disposing);
@@ -56,16 +68,19 @@ namespace JSON_Tools.Forms
             this.PythonStyleItem = new System.Windows.Forms.ToolStripMenuItem();
             this.RemesPathStyleItem = new System.Windows.Forms.ToolStripMenuItem();
             this.CopyPathItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.JavaScriptStyleKeyItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.JavaScriptStylePathItem = new System.Windows.Forms.ToolStripMenuItem();
             this.PythonStylePathItem = new System.Windows.Forms.ToolStripMenuItem();
             this.RemesPathStylePathItem = new System.Windows.Forms.ToolStripMenuItem();
             this.ToggleSubtreesItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.SelectThisItem = new System.Windows.Forms.ToolStripMenuItem();
             this.OpenSortFormItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.SelectAllChildrenItem = new System.Windows.Forms.ToolStripMenuItem();
             this.CurrentPathBox = new System.Windows.Forms.TextBox();
             this.RefreshButton = new System.Windows.Forms.Button();
             this.FindReplaceButton = new System.Windows.Forms.Button();
-            this.SelectThisItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.SelectAllChildrenItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.DocumentTypeComboBox = new System.Windows.Forms.ComboBox();
+            this.path_separatorStyleItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.path_separatorStylePathItem = new System.Windows.Forms.ToolStripMenuItem();
             this.NodeRightClickMenu.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -74,10 +89,10 @@ namespace JSON_Tools.Forms
             this.Tree.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.Tree.Location = new System.Drawing.Point(4, 84);
+            this.Tree.Location = new System.Drawing.Point(4, 99);
             this.Tree.Name = "Tree";
-            this.Tree.Size = new System.Drawing.Size(457, 346);
-            this.Tree.TabIndex = 6;
+            this.Tree.Size = new System.Drawing.Size(457, 331);
+            this.Tree.TabIndex = 7;
             this.Tree.BeforeExpand += new System.Windows.Forms.TreeViewCancelEventHandler(this.Tree_BeforeExpand);
             this.Tree.AfterSelect += new System.Windows.Forms.TreeViewEventHandler(this.Tree_AfterSelect);
             this.Tree.NodeMouseClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.Tree_NodeMouseClick);
@@ -96,6 +111,13 @@ namespace JSON_Tools.Forms
             this.TypeIconList.Images.SetKeyName(5, "object type icon.PNG");
             this.TypeIconList.Images.SetKeyName(6, "string type icon.PNG");
             this.TypeIconList.Images.SetKeyName(7, "null type icon.PNG");
+            this.TypeIconList.Images.SetKeyName(8, "array type icon darkmode.PNG");
+            this.TypeIconList.Images.SetKeyName(9, "bool type icon darkmode.PNG");
+            this.TypeIconList.Images.SetKeyName(10, "date type icon darkmode.PNG");
+            this.TypeIconList.Images.SetKeyName(11, "float type icon darkmode.PNG");
+            this.TypeIconList.Images.SetKeyName(12, "int type icon darkmode.PNG");
+            this.TypeIconList.Images.SetKeyName(13, "object type icon darkmode.PNG");
+            this.TypeIconList.Images.SetKeyName(14, "string type icon darkmode.PNG");
             // 
             // QueryBox
             // 
@@ -105,7 +127,7 @@ namespace JSON_Tools.Forms
             this.QueryBox.Location = new System.Drawing.Point(4, 4);
             this.QueryBox.Multiline = true;
             this.QueryBox.Name = "QueryBox";
-            this.QueryBox.Size = new System.Drawing.Size(203, 74);
+            this.QueryBox.Size = new System.Drawing.Size(203, 89);
             this.QueryBox.TabIndex = 0;
             this.QueryBox.Text = "@";
             this.QueryBox.KeyPress += new System.Windows.Forms.KeyPressEventHandler(this.QueryBox_KeyPress);
@@ -176,7 +198,8 @@ namespace JSON_Tools.Forms
             this.CopyKeyItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.JavaScriptStyleItem,
             this.PythonStyleItem,
-            this.RemesPathStyleItem});
+            this.RemesPathStyleItem,
+            this.path_separatorStyleItem});
             this.CopyKeyItem.Name = "CopyKeyItem";
             this.CopyKeyItem.Size = new System.Drawing.Size(267, 24);
             this.CopyKeyItem.Text = "Key/index to clipboard";
@@ -184,47 +207,48 @@ namespace JSON_Tools.Forms
             // JavaScriptStyleItem
             // 
             this.JavaScriptStyleItem.Name = "JavaScriptStyleItem";
-            this.JavaScriptStyleItem.Size = new System.Drawing.Size(198, 26);
+            this.JavaScriptStyleItem.Size = new System.Drawing.Size(268, 26);
             this.JavaScriptStyleItem.Text = "JavaScript style";
             // 
             // PythonStyleItem
             // 
             this.PythonStyleItem.Name = "PythonStyleItem";
-            this.PythonStyleItem.Size = new System.Drawing.Size(198, 26);
+            this.PythonStyleItem.Size = new System.Drawing.Size(268, 26);
             this.PythonStyleItem.Text = "Python style";
             // 
             // RemesPathStyleItem
             // 
             this.RemesPathStyleItem.Name = "RemesPathStyleItem";
-            this.RemesPathStyleItem.Size = new System.Drawing.Size(198, 26);
+            this.RemesPathStyleItem.Size = new System.Drawing.Size(268, 26);
             this.RemesPathStyleItem.Text = "RemesPath style";
             // 
             // CopyPathItem
             // 
             this.CopyPathItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.JavaScriptStyleKeyItem,
+            this.JavaScriptStylePathItem,
             this.PythonStylePathItem,
-            this.RemesPathStylePathItem});
+            this.RemesPathStylePathItem,
+            this.path_separatorStylePathItem});
             this.CopyPathItem.Name = "CopyPathItem";
             this.CopyPathItem.Size = new System.Drawing.Size(267, 24);
             this.CopyPathItem.Text = "Path to clipboard";
             // 
-            // JavaScriptStyleKeyItem
+            // JavaScriptStylePathItem
             // 
-            this.JavaScriptStyleKeyItem.Name = "JavaScriptStyleKeyItem";
-            this.JavaScriptStyleKeyItem.Size = new System.Drawing.Size(198, 26);
-            this.JavaScriptStyleKeyItem.Text = "JavaScript style";
+            this.JavaScriptStylePathItem.Name = "JavaScriptStylePathItem";
+            this.JavaScriptStylePathItem.Size = new System.Drawing.Size(268, 26);
+            this.JavaScriptStylePathItem.Text = "JavaScript style";
             // 
             // PythonStylePathItem
             // 
             this.PythonStylePathItem.Name = "PythonStylePathItem";
-            this.PythonStylePathItem.Size = new System.Drawing.Size(198, 26);
+            this.PythonStylePathItem.Size = new System.Drawing.Size(268, 26);
             this.PythonStylePathItem.Text = "Python style";
             // 
             // RemesPathStylePathItem
             // 
             this.RemesPathStylePathItem.Name = "RemesPathStylePathItem";
-            this.RemesPathStylePathItem.Size = new System.Drawing.Size(198, 26);
+            this.RemesPathStylePathItem.Size = new System.Drawing.Size(268, 26);
             this.RemesPathStylePathItem.Text = "RemesPath style";
             // 
             // ToggleSubtreesItem
@@ -233,12 +257,25 @@ namespace JSON_Tools.Forms
             this.ToggleSubtreesItem.Size = new System.Drawing.Size(267, 24);
             this.ToggleSubtreesItem.Text = "Expand/collapse all subtrees";
             // 
+            // SelectThisItem
+            // 
+            this.SelectThisItem.Name = "SelectThisItem";
+            this.SelectThisItem.Size = new System.Drawing.Size(267, 24);
+            this.SelectThisItem.Text = "Select this";
+            // 
             // OpenSortFormItem
             // 
             this.OpenSortFormItem.Name = "OpenSortFormItem";
             this.OpenSortFormItem.Size = new System.Drawing.Size(267, 24);
             this.OpenSortFormItem.Text = "Sort array...";
             this.OpenSortFormItem.Visible = false;
+            // 
+            // SelectAllChildrenItem
+            // 
+            this.SelectAllChildrenItem.Name = "SelectAllChildrenItem";
+            this.SelectAllChildrenItem.Size = new System.Drawing.Size(267, 24);
+            this.SelectAllChildrenItem.Text = "Select all children";
+            this.SelectAllChildrenItem.Visible = false;
             // 
             // CurrentPathBox
             // 
@@ -248,7 +285,7 @@ namespace JSON_Tools.Forms
             this.CurrentPathBox.Name = "CurrentPathBox";
             this.CurrentPathBox.ReadOnly = true;
             this.CurrentPathBox.Size = new System.Drawing.Size(337, 22);
-            this.CurrentPathBox.TabIndex = 8;
+            this.CurrentPathBox.TabIndex = 10;
             this.CurrentPathBox.TabStop = false;
             // 
             // RefreshButton
@@ -270,38 +307,56 @@ namespace JSON_Tools.Forms
             this.FindReplaceButton.Location = new System.Drawing.Point(4, 435);
             this.FindReplaceButton.Name = "FindReplaceButton";
             this.FindReplaceButton.Size = new System.Drawing.Size(114, 23);
-            this.FindReplaceButton.TabIndex = 7;
+            this.FindReplaceButton.TabIndex = 9;
             this.FindReplaceButton.Text = "Find/replace";
             this.FindReplaceButton.UseVisualStyleBackColor = true;
             this.FindReplaceButton.Click += new System.EventHandler(this.FindReplaceButton_Click);
             this.FindReplaceButton.KeyUp += new System.Windows.Forms.KeyEventHandler(this.TreeViewer_KeyUp);
             // 
-            // SelectThisItem
+            // DocumentTypeComboBox
             // 
-            this.SelectThisItem.Name = "SelectThisItem";
-            this.SelectThisItem.Size = new System.Drawing.Size(267, 24);
-            this.SelectThisItem.Text = "Select this";
+            this.DocumentTypeComboBox.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.DocumentTypeComboBox.AutoCompleteMode = System.Windows.Forms.AutoCompleteMode.SuggestAppend;
+            this.DocumentTypeComboBox.FormattingEnabled = true;
+            this.DocumentTypeComboBox.Items.AddRange(new object[] {
+            "JSON mode",
+            "JSONL mode",
+            "INI mode",
+            "REGEX mode"});
+            this.DocumentTypeComboBox.Location = new System.Drawing.Point(220, 69);
+            this.DocumentTypeComboBox.Name = "DocumentTypeComboBox";
+            this.DocumentTypeComboBox.Size = new System.Drawing.Size(130, 24);
+            this.DocumentTypeComboBox.TabIndex = 6;
+            this.DocumentTypeComboBox.SelectedIndexChanged += new System.EventHandler(this.DocumentTypeComboBox_SelectedIndexChanged);
+            this.DocumentTypeComboBox.KeyPress += new System.Windows.Forms.KeyPressEventHandler(this.QueryBox_KeyPress);
+            this.DocumentTypeComboBox.KeyUp += new System.Windows.Forms.KeyEventHandler(this.TreeViewer_KeyUp);
             // 
-            // SelectAllChildrenItem
+            // path_separatorStyleItem
             // 
-            this.SelectAllChildrenItem.Name = "SelectAllChildrenItem";
-            this.SelectAllChildrenItem.Size = new System.Drawing.Size(267, 24);
-            this.SelectAllChildrenItem.Text = "Select all children";
-            this.SelectAllChildrenItem.Visible = false;
+            this.path_separatorStyleItem.Name = "path_separatorStyleItem";
+            this.path_separatorStyleItem.Size = new System.Drawing.Size(268, 26);
+            this.path_separatorStyleItem.Text = "Use path_separator setting";
+            // 
+            // path_separatorStylePathItem
+            // 
+            this.path_separatorStylePathItem.Name = "path_separatorStylePathItem";
+            this.path_separatorStylePathItem.Size = new System.Drawing.Size(268, 26);
+            this.path_separatorStylePathItem.Text = "Use path_separator setting";
             // 
             // TreeViewer
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(471, 461);
-            this.Controls.Add(this.FindReplaceButton);
-            this.Controls.Add(this.RefreshButton);
-            this.Controls.Add(this.CurrentPathBox);
+            this.Controls.Add(this.QueryBox);
+            this.Controls.Add(this.SubmitQueryButton);
             this.Controls.Add(this.QueryToCsvButton);
             this.Controls.Add(this.SaveQueryButton);
-            this.Controls.Add(this.SubmitQueryButton);
-            this.Controls.Add(this.QueryBox);
+            this.Controls.Add(this.RefreshButton);
+            this.Controls.Add(this.DocumentTypeComboBox);
             this.Controls.Add(this.Tree);
+            this.Controls.Add(this.FindReplaceButton);
+            this.Controls.Add(this.CurrentPathBox);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "TreeViewer";
             this.Text = "TreeViewer";
@@ -324,7 +379,7 @@ namespace JSON_Tools.Forms
         private System.Windows.Forms.ToolStripMenuItem PythonStyleItem;
         private System.Windows.Forms.ToolStripMenuItem RemesPathStyleItem;
         private System.Windows.Forms.ToolStripMenuItem CopyPathItem;
-        private System.Windows.Forms.ToolStripMenuItem JavaScriptStyleKeyItem;
+        private System.Windows.Forms.ToolStripMenuItem JavaScriptStylePathItem;
         private System.Windows.Forms.ToolStripMenuItem PythonStylePathItem;
         private System.Windows.Forms.ToolStripMenuItem RemesPathStylePathItem;
         private System.Windows.Forms.TextBox CurrentPathBox;
@@ -337,5 +392,8 @@ namespace JSON_Tools.Forms
         private System.Windows.Forms.ToolStripMenuItem OpenSortFormItem;
         private System.Windows.Forms.ToolStripMenuItem SelectThisItem;
         private System.Windows.Forms.ToolStripMenuItem SelectAllChildrenItem;
+        private System.Windows.Forms.ComboBox DocumentTypeComboBox;
+        private System.Windows.Forms.ToolStripMenuItem path_separatorStyleItem;
+        private System.Windows.Forms.ToolStripMenuItem path_separatorStylePathItem;
     }
 }

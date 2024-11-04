@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows.Forms;
 using JSON_Tools.JSON_Tools;
 using JSON_Tools.Utils;
@@ -15,56 +17,69 @@ namespace JSON_Tools.Forms
     {
         public TreeViewer tv;
         public JsonGrepper grepper;
-        HashSet<string> files_found;
-        private readonly FileInfo directories_visited_file;
-        private readonly FileInfo urls_queried_file;
-        private List<string> urls_queried;
+        HashSet<string> filesFound;
+        private readonly FileInfo directoriesVisitedFile;
+        private readonly FileInfo urlsQueriedFile;
+        private List<string> urlsQueried;
+        // fields related to progress reporting
+        private const int CHECKPOINT_COUNT = 25;
+        private Form progressBarForm;
+        private MyProgressBar progressBar;
+        private bool isParsing;
+        private Button cancelButton;
+        private MyLabel progressLabel;
+        private static object progressReportLock = new object();
+        private static Dictionary<string, string> progressBarTranslatedStrings = null;
 
         public GrepperForm()
         {
             InitializeComponent();
+            NppFormHelper.RegisterFormIfModeless(this, false);
             FormStyle.ApplyStyle(this, Main.settings.use_npp_styling);
-            grepper = new JsonGrepper(Main.jsonParser.Copy(),
-                Main.settings.max_threads_parsing
-            );
+            grepper = new JsonGrepper(Main.JsonParserFromSettings(), true, CHECKPOINT_COUNT, CreateProgressReportForm, ReportJsonParsingProgress, AfterProgressReport);
             tv = null;
-            files_found = new HashSet<string>();
-            var config_subdir = Path.Combine(Npp.notepad.GetConfigDirectory(), Main.PluginName);
-            directories_visited_file = new FileInfo(Path.Combine(config_subdir, $"{Main.PluginName} directories visited.txt"));
-            int max_dirname_chars = DirectoriesVisitedBox.Items[0].ToString().Length;
-            if (directories_visited_file.Exists)
+            filesFound = new HashSet<string>();
+            var configSubdir = Path.Combine(Npp.notepad.GetConfigDirectory(), Main.PluginName);
+            directoriesVisitedFile = new FileInfo(Path.Combine(configSubdir, $"{Main.PluginName} directories visited.txt"));
+            int maxDirnameChars = DirectoriesVisitedBox.Items[0].ToString().Length;
+            if (directoriesVisitedFile.Exists)
             {
-                string[] dirs_visited = new string[] { "" };
-                using (var fp = new StreamReader(directories_visited_file.OpenRead(), Encoding.UTF8, true))
+                string[] dirsVisited = new string[] { "" };
+                using (var fp = new StreamReader(directoriesVisitedFile.OpenRead(), Encoding.UTF8, true))
                 {
-                    dirs_visited = fp.ReadToEnd().Split('\n');
+                    dirsVisited = fp.ReadToEnd().Split('\n');
                 }
-                foreach (string dir_visited in dirs_visited)
+                foreach (string dirVisited in dirsVisited)
                 {
-                    if (dir_visited.Length > 0)
-                        DirectoriesVisitedBox.Items.Add(dir_visited);
+                    if (Directory.Exists(dirVisited))
+                        DirectoriesVisitedBox.Items.Add(dirVisited);
                     // increase the dropdown width as needed to accomodate the longest dirname
-                    if (dir_visited.Length > max_dirname_chars)
-                        max_dirname_chars = dir_visited.Length;
+                    if (dirVisited.Length > maxDirnameChars)
+                        maxDirnameChars = dirVisited.Length;
                 }
             }
-            DirectoriesVisitedBox.DropDownWidth = max_dirname_chars * 7;
-            urls_queried_file = new FileInfo(Path.Combine(config_subdir, $"{Main.PluginName} urls queried.txt"));
-            urls_queried = new List<string>();
-            if (urls_queried_file.Exists)
+            DirectoriesVisitedBox.DropDownWidth = maxDirnameChars * 7;
+            urlsQueriedFile = new FileInfo(Path.Combine(configSubdir, $"{Main.PluginName} urls queried.txt"));
+            urlsQueried = new List<string>();
+            if (urlsQueriedFile.Exists)
             {
-                using (var fp2 = new StreamReader(urls_queried_file.OpenRead(), Encoding.UTF8, true))
+                using (var fp2 = new StreamReader(urlsQueriedFile.OpenRead(), Encoding.UTF8, true))
                 {
-                    var urls_text = CleanUrlsBoxText(fp2.ReadToEnd().Split('\n'));
-                    UrlsBox.Text = urls_text;
-                    urls_queried.AddRange(UrlsBox.Lines);
+                    var urlsText = CleanUrlsBoxText(fp2.ReadToEnd().Split('\n'));
+                    UrlsBox.Text = urlsText;
+                    urlsQueried.AddRange(UrlsBox.Lines);
                 }
             }
             DirectoriesVisitedBox.SelectedIndex = 0;
+            // we need to select something other than the UrlsBox because otherwise all its text will be selected
+            //    and the user could accidentally overwrite it.
+            SearchDirectoriesButton.Select();
         }
 
         private async void SendRequestsButton_Click(object sender, EventArgs e)
         {
+            if (grepper.isBusy)
+                return;
             string[] urls;
             try
             {
@@ -85,7 +100,7 @@ namespace JSON_Tools.Forms
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.ToString(), 
+                Translator.ShowTranslatedMessageBox(ex.ToString(),
                     "Error while sending API requests",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
@@ -109,7 +124,7 @@ namespace JSON_Tools.Forms
 
         private void DocsButton_Click(object sender, EventArgs e)
         {
-            Main.docs();
+            Main.OpenUrlInWebBrowser("https://github.com/molsonkiko/JsonToolsNppPlugin/blob/main/docs/README.md#get-json-from-files-and-apis");
         }
 
         private string LastVisitedDirectory()
@@ -119,61 +134,231 @@ namespace JSON_Tools.Forms
 
         private void ChooseDirectoriesButton_Click(object sender, EventArgs e)
         {
-            string[] search_patterns = SearchPatternsBox.Lines;
-            bool recursive = RecursiveSearchCheckBox.Checked;
             FolderBrowserDialog1.RootFolder = Environment.SpecialFolder.MyComputer;
             // the user can select from previously opened directories, or they can use a folder browser dialog
             FolderBrowserDialog1.SelectedPath = DirectoriesVisitedBox.Items.Count == 0
                 ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
                 : LastVisitedDirectory();
-            if (DirectoriesVisitedBox.SelectedIndex != 0 || FolderBrowserDialog1.ShowDialog() == DialogResult.OK)
+            if (FolderBrowserDialog1.ShowDialog() == DialogResult.OK)
             {
-                string root_dir;
-                // if the user used the dialog, add the folder found to the list of recently visited dirs
-                if (DirectoriesVisitedBox.SelectedIndex == 0)
+                DirectoriesVisitedBox.Text = FolderBrowserDialog1.SelectedPath;
+                AddDirectoryToDirectoriesVisited(FolderBrowserDialog1.SelectedPath);
+            }
+        }
+
+        private async void SearchDirectoriesButton_Click(object sender, EventArgs e)
+        {
+            if (grepper.isBusy)
+                return;
+            string[] searchPatterns = SearchPatternsBox.Lines;
+            bool recursive = RecursiveSearchCheckBox.Checked;
+            string rootDir = DirectoriesVisitedBox.Text;
+            AddDirectoryToDirectoriesVisited(rootDir);
+            if (Directory.Exists(rootDir))
+            {
+                UseWaitCursor = true;
+                try
                 {
-                    root_dir = FolderBrowserDialog1.SelectedPath;
-                    DirectoriesVisitedBox.Items.Add(root_dir);
-                    // only track 10 most recently visited dirs
-                    // the count will be at most 11 because we always have the reminder as item at index 0.
-                    if (DirectoriesVisitedBox.Items.Count > 11)
-                        DirectoriesVisitedBox.Items.RemoveAt(1);
-                    // increase the dropdown width as needed to accomodate the longest dirname
-                    if (root_dir.Length * 7 > DirectoriesVisitedBox.DropDownWidth)
-                        DirectoriesVisitedBox.DropDownWidth = root_dir.Length * 7;
+                    await grepper.Grep(rootDir, recursive, searchPatterns);
                 }
-                else root_dir = DirectoriesVisitedBox.Items[DirectoriesVisitedBox.SelectedIndex].ToString();
-                if (Directory.Exists(root_dir))
+                catch (Exception ex)
                 {
-                    foreach (string search_pattern in search_patterns)
+                    Translator.ShowTranslatedMessageBox(
+                        "While searching JSON files, got an exception:\r\n{0}",
+                        "Json file search error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error,
+                        1, RemesParser.PrettifyException(ex));
+                }
+                UseWaitCursor = false;
+            }
+            AddFilesToFilesFound();
+        }
+
+        private void CreateProgressReportForm(int totalLengthToParse, long totalLengthOnHardDrive)
+        {
+            string totLengthToParseMB = (totalLengthToParse / 1e6).ToString("F3", JNode.DOT_DECIMAL_SEP);
+            string totLengthOnHardDriveMB = (totalLengthOnHardDrive / 1e6).ToString("F3", JNode.DOT_DECIMAL_SEP);
+            isParsing = totalLengthOnHardDrive == -1;
+            string titleIfParsing = "JSON parsing in progress";
+            string titleIfReading = "File reading in progress";
+            string captionIfParsing = "File reading complete.\r\nNow parsing {0} documents with combined length of about {1} MB";
+            string captionIfReading = "Now reading {0} files with a combined length of about {1} MB";
+            string progressLabelIfParsing = "0 MB of {0} MB parsed";
+            string progressLabelIfReading = "0 of {0} files read";
+            if (progressBarTranslatedStrings is null)
+            {
+                progressBarTranslatedStrings = new Dictionary<string, string>
+                {
+                    ["titleIfParsing"] = titleIfParsing,
+                    ["titleIfReading"] = titleIfReading,
+                    ["captionIfParsing"] = captionIfParsing,
+                    ["captionIfReading"] = captionIfReading,
+                    ["progressLabelIfParsing"] = progressLabelIfParsing,
+                    ["progressLabelIfReading"] = progressLabelIfReading,
+                };
+                string[] keys = progressBarTranslatedStrings.Keys.ToArray();
+                if (Translator.TryGetTranslationAtPath(new string[] {"forms", "GrepperFormProgressBar", "controls"}, out JNode progressBarTransNode) && progressBarTransNode is JObject progressBarTrans)
+                {
+                    foreach (string key in keys)
                     {
-                        try
-                        {
-                            // TODO: this could take a long time; maybe add a line to show a MessageBox
-                            // that asks if you want to stop the search after a little while?
-                            UseWaitCursor = true;
-                            grepper.Grep(root_dir, recursive, search_pattern);
-                            UseWaitCursor = false;
-                        }
-                        catch (Exception ex)
-                        {
-                            MessageBox.Show("JSON file search failed:\n" + RemesParser.PrettifyException(ex),
-                                "Json file search error",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Error);
-                        }
+                        if (progressBarTrans.TryGetValue(key, out JNode val) && val.value is string s)
+                            progressBarTranslatedStrings[key] = s;
                     }
                 }
             }
-            DirectoriesVisitedBox.SelectedIndex = 0;
-            AddFilesToFilesFound();
+            Label label = new Label
+            {
+                Name = "caption",
+                Text = isParsing
+                           ? Translator.TryTranslateWithFormatting(captionIfParsing, progressBarTranslatedStrings["captionIfParsing"], grepper.fnameStrings.Count, totLengthToParseMB)
+                           : Translator.TryTranslateWithFormatting(captionIfReading, progressBarTranslatedStrings["captionIfReading"], totalLengthToParse, totLengthOnHardDriveMB),
+                TextAlign = ContentAlignment.TopCenter,
+                Top = 20,
+                AutoSize = true,
+            };
+            progressLabel = new MyLabel
+            {
+                Name = "progressLabel",
+                Text = isParsing
+                        ? Translator.TryTranslateWithFormatting(progressLabelIfParsing, progressBarTranslatedStrings["progressLabelIfParsing"], totLengthToParseMB)
+                        : Translator.TryTranslateWithFormatting(progressLabelIfReading, progressBarTranslatedStrings["progressLabelIfReading"], totalLengthToParse),
+                TextAlign = ContentAlignment.TopCenter,
+                Top = 85,
+                AutoSize = true,
+            };
+            progressBar = new MyProgressBar()
+            {
+                Name = "progress",
+                Minimum = 0,
+                Maximum = totalLengthToParse,
+                Style = ProgressBarStyle.Blocks,
+                Left = 20,
+                Width = 450,
+                Top = 105,
+                Height = 50,
+            };
+
+
+            progressBarForm = new Form
+            {
+                Name = "GrepperFormProgressBar",
+                Text = isParsing ? progressBarTranslatedStrings["titleIfParsing"] : progressBarTranslatedStrings["titleIfReading"],
+                Controls = { label, progressLabel, progressBar },
+                Width = 500,
+                Height = 250,
+            };
+
+            if (JsonGrepper.CAN_CANCEL_PARSING || !isParsing)
+            {
+                cancelButton = new Button
+                {
+                    Name = "Cancel",
+                    Left = 200,
+                    Top = 175,
+                    Text = "Cancel",
+                };
+                cancelButton.Click += new EventHandler((_, __) => grepper.Cancel());
+                progressBarForm.Controls.Add(cancelButton);
+            }
+
+            if (label.Right > progressBarForm.Width)
+            {
+                progressBarForm.SuspendLayout();
+                progressBarForm.Width = label.Right + 20;
+                progressBarForm.ResumeLayout(false);
+            }
+            progressBarForm.Show();
+            if (!isParsing)
+            {
+                Thread.Sleep(20);
+                progressBarForm.Refresh();
+            }
+        }
+
+        private class MyProgressBar : ProgressBar
+        {
+            public MyProgressBar() : base()
+            {
+                CheckForIllegalCrossThreadCalls = false;
+            }
+        }
+
+        private class MyLabel : Label
+        {
+            public MyLabel() : base()
+            {
+                CheckForIllegalCrossThreadCalls = false;
+            }
+        }
+
+        private void ReportJsonParsingProgress(int lengthParsedSoFar, int __)
+        {
+            if (isParsing)
+            {
+#if PARSER_PARALLEL
+                // wait a bit trying to lock the progress bar; otherwise just give up to avoid deadlock
+                if (Monitor.TryEnter(progressReportLock, 500))
+                {
+                    try
+                    {
+                        progressLabel.Text = Regex.Replace(progressLabel.Text, @"^\d+(?:\.\d+)?", _ => (lengthParsedSoFar / 1e6).ToString("F3", JNode.DOT_DECIMAL_SEP));
+                        progressBar.Value = lengthParsedSoFar > progressBar.Maximum ? progressBar.Maximum : lengthParsedSoFar;
+                    }
+                    finally
+                    {
+                        Monitor.Exit(progressReportLock);
+                    }
+                }
+#else
+                progressLabel.Text = Regex.Replace(progressLabel.Text, @"^\d+(?:\.\d+)?", _ => (lengthParsedSoFar / 1e6).ToString("F3", JNode.DOT_DECIMAL_SEP));
+                progressBar.Value = lengthParsedSoFar > progressBar.Maximum ? progressBar.Maximum : lengthParsedSoFar;
+                progressLabel.Refresh();
+#endif
+
+            }
+            else
+            {
+                // don't need to use the lock when reading files, because that is single-threaded
+                progressLabel.Text = Regex.Replace(progressLabel.Text, @"^\d+", _ => lengthParsedSoFar.ToString());
+                progressBar.Value = lengthParsedSoFar > progressBar.Maximum ? progressBar.Maximum : lengthParsedSoFar;
+                progressLabel.Refresh();
+            }
+        }
+
+        private void AfterProgressReport()
+        {
+            progressBarForm.Close();
+            progressBarForm = null;
+            progressBar = null;
+            progressLabel = null;
+            cancelButton = null;
+            ViewResultsButton.Focus();
+        }
+
+        private void AddDirectoryToDirectoriesVisited(string rootDir)
+        {
+            if (!Directory.Exists(rootDir) || DirectoriesVisitedBox.Items.IndexOf(rootDir) >= 0)
+                return; // only add existing directories that aren't already in the list
+            DirectoriesVisitedBox.Items.Add(rootDir);
+            // only track 10 most recently visited dirs
+            // the count will be at most 11 because we always have the reminder as item at index 0.
+            if (DirectoriesVisitedBox.Items.Count > 11)
+                DirectoriesVisitedBox.Items.RemoveAt(1);
+            // increase the dropdown width as needed to accomodate the longest dirname
+            if (rootDir.Length * 7 > DirectoriesVisitedBox.DropDownWidth)
+                DirectoriesVisitedBox.DropDownWidth = rootDir.Length * 7;
         }
 
         private void ViewErrorsButton_Click(object sender, EventArgs e)
         {
             if (grepper.exceptions.Length == 0)
             {
-                MessageBox.Show("No exceptions! \U0001f600"); // smily face
+                Translator.ShowTranslatedMessageBox(
+                    "No exceptions! {0}",
+                    "No errors while searching documents",
+                    MessageBoxButtons.OK, MessageBoxIcon.None,
+                    1, "\U0001f600"); // smily face
                 return;
             }
             Main.PrettyPrintJsonInNewFile(grepper.exceptions);
@@ -182,30 +367,30 @@ namespace JSON_Tools.Forms
         private void RemoveSelectedFilesButton_Click(object sender, EventArgs e)
         {
             Main.grepperTreeViewJustOpened = true;
-            var selected_files = new List<string>();
+            var selectedFiles = new List<string>();
             foreach (object file in FilesFoundBox.SelectedItems)
             // have to create a separate list to avoid an error from mutating something
             // while enumerating it
             {
-                selected_files.Add((string)file);
+                selectedFiles.Add((string)file);
             }
-            foreach (string file in selected_files)
+            foreach (string file in selectedFiles)
             {
                 FilesFoundBox.Items.Remove(file);
-                files_found.Remove(file);
-                grepper.fname_jsons.children.Remove(file);
+                filesFound.Remove(file);
+                grepper.fnameJsons.children.Remove(file);
             }
             if (tv != null)
             {
                 // refresh the tree view with the current query executed
                 // on the pruned JSON
                 // also overwrite the grepper tree's buffer with the pruned JSON
-                tv.json = grepper.fname_jsons;
-                string file_open = Npp.notepad.GetCurrentFilePath();
+                tv.json = grepper.fnameJsons;
+                string fileOpen = Npp.notepad.GetCurrentFilePath();
                 Npp.notepad.OpenFile(tv.fname);
-                Npp.editor.SetText(tv.json.PrettyPrintAndChangePositions());
+                Npp.editor.SetText(Main.PrettyPrintFromSettings(tv.json));
                 tv.SubmitQueryButton.PerformClick();
-                Npp.notepad.OpenFile(file_open);
+                Npp.notepad.OpenFile(fileOpen);
                 if (Main.openTreeViewer != null && !Main.openTreeViewer.IsDisposed)
                     Npp.notepad.HideDockingForm(Main.openTreeViewer);
             }
@@ -214,16 +399,19 @@ namespace JSON_Tools.Forms
         private void ViewResultsButton_Click(object sender, EventArgs e)
         {
             Main.grepperTreeViewJustOpened = true;
-            Main.PrettyPrintJsonInNewFile(grepper.fname_jsons);
+            Main.PrettyPrintJsonInNewFile(grepper.fnameJsons);
             if (tv != null && !tv.IsDisposed)
             {
                 RemoveOwnedForm(tv);
                 Npp.notepad.HideDockingForm(tv);
                 tv.Close();
             }
-            tv = new TreeViewer(grepper.fname_jsons);
+            tv = new TreeViewer(grepper.fnameJsons);
             AddOwnedForm(tv);
-            Main.DisplayJsonTree(tv, tv.json, "JSON from files and APIs tree", false);
+            string treeName = "JSON from files and APIs tree";
+            if (Translator.TryGetTranslationAtPath(new string[] { "forms", "TreeViewer", "titleIfGrepperForm" }, out JNode node) && node.value is string s)
+                treeName = s;
+            Main.DisplayJsonTree(tv, tv.json, treeName, false, DocumentType.JSON, false);
             if (Main.openTreeViewer != null && !Main.openTreeViewer.IsDisposed)
                 Npp.notepad.HideDockingForm(Main.openTreeViewer);
         }
@@ -237,8 +425,16 @@ namespace JSON_Tools.Forms
         /// <param name="e"></param>
         private void GrepperForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            grepper.Reset();
-            if (tv != null)
+            if (grepper != null)
+            {
+                grepper.Cancel();
+                grepper.Reset();
+            }
+            if (progressBarForm != null && !progressBarForm.IsDisposed)
+            {
+                progressBarForm.Close();
+            }
+            if (tv != null && !tv.IsDisposed)
             {
                 Npp.notepad.HideDockingForm(tv);
                 tv.Close();
@@ -251,7 +447,7 @@ namespace JSON_Tools.Forms
             if (DirectoriesVisitedBox.Items.Count > 1)
             {
                 Npp.CreateConfigSubDirectoryIfNotExists();
-                using (var fp = new StreamWriter(directories_visited_file.OpenWrite(), Encoding.UTF8))
+                using (var fp = new StreamWriter(directoriesVisitedFile.OpenWrite(), Encoding.UTF8))
                 {
                     for (int ii = 1; ii < DirectoriesVisitedBox.Items.Count; ii++)
                     {
@@ -263,18 +459,37 @@ namespace JSON_Tools.Forms
             if (UrlsBox.Text.Length > 0)
             {
                 Npp.CreateConfigSubDirectoryIfNotExists();
-                using (var fp2 = new StreamWriter(urls_queried_file.OpenWrite(), Encoding.UTF8))
+                using (var fp2 = new StreamWriter(urlsQueriedFile.OpenWrite(), Encoding.UTF8))
                 {
-                    fp2.Write(CleanUrlsBoxText(urls_queried));
+                    fp2.Write(CleanUrlsBoxText(urlsQueried));
                     fp2.Write("\r\n");
                     fp2.Flush();
                 }
             }
         }
 
+        /// <summary>
+        /// suppress the default response to the Tab key
+        /// </summary>
+        /// <param name="keyData"></param>
+        /// <returns></returns>
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            if (keyData.HasFlag(Keys.Tab)) // this covers Tab with or without modifiers
+                return true;
+            return base.ProcessDialogKey(keyData);
+        }
+
         private void GrepperForm_KeyUp(object sender, KeyEventArgs e)
         {
-            SortForm.GenericKeyUpHandler(this, sender, e);
+            NppFormHelper.GenericKeyUpHandler(this, sender, e, false);
+            // Enter in the DirectoriesVisitedBox selects the entered directory
+            if (e.KeyCode == Keys.Enter &&
+                sender is ComboBox cbx && cbx.Name == "DirectoriesVisitedBox"
+                && Directory.Exists(cbx.Text))
+            {
+                SearchDirectoriesButton.PerformClick();
+            }
             //if (e.Alt)
             //{
             //    switch (e.KeyCode)
@@ -297,23 +512,25 @@ namespace JSON_Tools.Forms
 
         private void AddFilesToFilesFound()
         {
-            var url_regex = new Regex("^https?://");
-            foreach (string fname in grepper.fname_jsons.children.Keys)
+            FilesFoundBox.SuspendLayout();
+            var urlRegex = new Regex("^https?://");
+            foreach (string fname in grepper.fnameJsons.children.Keys)
             {
-                if (!files_found.Contains(fname))
+                if (!filesFound.Contains(fname))
                 {
                     FilesFoundBox.Items.Add(fname);
-                    files_found.Add(fname);
+                    filesFound.Add(fname);
                 }
                 // if it's a URL, add it to the list
-                if (url_regex.IsMatch(fname) && !urls_queried.Contains(fname))
+                if (urlRegex.IsMatch(fname) && !urlsQueried.Contains(fname))
                 {
-                    urls_queried.Add(fname);
+                    urlsQueried.Add(fname);
                     // keep list of remembered URLs to <= 10
-                    if (urls_queried.Count > 10)
-                        urls_queried.RemoveAt(0);
+                    if (urlsQueried.Count > 10)
+                        urlsQueried.RemoveAt(0);
                 }
             }
+            FilesFoundBox.ResumeLayout(false);
         }
     }
 }

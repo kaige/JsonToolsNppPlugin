@@ -13,14 +13,25 @@ namespace JSON_Tools.Forms
         private string findQuery;
         private string replaceQuery;
         private const int EXTENDED_HEIGHT = 441;
+        private const int WIDTH = 391;
+        private const int ADVANCED_CONTROLS_WIDTH = 337;
         private const int COLLAPSED_HEIGHT = EXTENDED_HEIGHT - ADVANCED_CONTROLS_EXTENDED_HEIGHT + ADVANCED_CONTROLS_COLLAPSED_HEIGHT;
         private const int ADVANCED_CONTROLS_EXTENDED_HEIGHT = 163;
         private const int ADVANCED_CONTROLS_COLLAPSED_HEIGHT = 11;
         int previousKeysValsBothBox_SelectedIndex = 2;
 
+        private static int collapsedWidth = WIDTH;
+        private static int collapsedHeight = COLLAPSED_HEIGHT;
+        private static int extendedHeight = EXTENDED_HEIGHT;
+        private static int extendedWidth = WIDTH;
+        private static int advancedControlsExtendedWidth = ADVANCED_CONTROLS_WIDTH;
+        private static int advancedControlsExtendedHeight = ADVANCED_CONTROLS_EXTENDED_HEIGHT;
+        private static bool hasFoundCorrectAdvancedControlsSize = false;
+
         public FindReplaceForm(TreeViewer treeViewer)
         {
             InitializeComponent();
+            NppFormHelper.RegisterFormIfModeless(this, false);
             FormStyle.ApplyStyle(this, Main.settings.use_npp_styling);
             this.treeViewer = treeViewer;
             // if the user is querying a subset of the JSON, the find/replace is done on that subset
@@ -41,6 +52,7 @@ namespace JSON_Tools.Forms
             KeysValsBothBox.SelectedIndex = 2;
             AdvancedGroupBox.Height = ADVANCED_CONTROLS_COLLAPSED_HEIGHT;
             Height = COLLAPSED_HEIGHT;
+            (collapsedWidth, collapsedHeight) = Translator.ExpandToFitAllControls(this, true, true);
             findQuery = "";
             replaceQuery = "";
         }
@@ -56,9 +68,21 @@ namespace JSON_Tools.Forms
                 e.SuppressKeyPress = true;
         }
 
+        /// <summary>
+        /// suppress the default response to the Tab key
+        /// </summary>
+        /// <param name="keyData"></param>
+        /// <returns></returns>
+        protected override bool ProcessDialogKey(Keys keyData)
+        {
+            if (keyData.HasFlag(Keys.Tab)) // this covers Tab with or without modifiers
+                return true;
+            return base.ProcessDialogKey(keyData);
+        }
+
         private void FindReplaceForm_KeyUp(object sender, KeyEventArgs e)
         {
-            SortForm.GenericKeyUpHandler(this, sender, e);
+            NppFormHelper.GenericKeyUpHandler(this, sender, e, false);
             //if (e.Alt)
             //{
             //    switch (e.KeyCode)
@@ -76,15 +100,30 @@ namespace JSON_Tools.Forms
                 e.Handled = true;
         }
 
-        private void AdvancedGroupBoxLabel_Click(object sender, EventArgs e)
+        private void ShowAdvancedOptionsCheckBox_CheckedChanged(object sender, EventArgs e)
         {
             // show the advanced controls and expand the box
             if (!RegexBox.Visible)
             {
-                if (Height < EXTENDED_HEIGHT)
-                    Height = EXTENDED_HEIGHT;
-                AdvancedGroupBoxLabel.Text = "Hide advanced options";
-                AdvancedGroupBox.Height = ADVANCED_CONTROLS_EXTENDED_HEIGHT;
+                if (!hasFoundCorrectAdvancedControlsSize)
+                {
+                    // on higher display resolutions, the AdvancedGroup box may need more space, so we will try recalculating
+                    (advancedControlsExtendedWidth, advancedControlsExtendedHeight) = Translator.ExpandToFitAllControls(AdvancedGroupBox, true, false);
+                    (extendedWidth, extendedHeight) = Translator.ExpandToFitAllControls(this, true, true);
+                    hasFoundCorrectAdvancedControlsSize = true;
+                }
+                else
+                {
+                    // use the best height and width we already determined
+                    if (Height < extendedHeight)
+                        Height = extendedHeight;
+                    if (Width < extendedWidth)
+                        Width = extendedWidth;
+                    AdvancedGroupBox.Height = advancedControlsExtendedHeight;
+                    AdvancedGroupBox.Width = advancedControlsExtendedWidth;
+                }
+                if (!Translator.HasTranslations) // the translator has options for checked and unchecked states already
+                    ShowAdvancedOptionsCheckBox.Text = "Hide advanced options";
                 foreach (Control control in AdvancedGroupBox.Controls)
                 {
                     control.Visible = true;
@@ -93,9 +132,12 @@ namespace JSON_Tools.Forms
             // hide the advanced controls and collapse the box
             else
             {
-                if (Height == EXTENDED_HEIGHT)
-                    Height = COLLAPSED_HEIGHT;
-                AdvancedGroupBoxLabel.Text = "Show advanced options";
+                if (Height == extendedHeight)
+                    Height = collapsedHeight;
+                if (Width == extendedWidth)
+                    Width = collapsedWidth;
+                if (!Translator.HasTranslations)
+                    ShowAdvancedOptionsCheckBox.Text = "Show advanced options";
                 AdvancedGroupBox.Height = ADVANCED_CONTROLS_COLLAPSED_HEIGHT;
                 foreach (Control control in AdvancedGroupBox.Controls)
                 {
@@ -135,15 +177,15 @@ namespace JSON_Tools.Forms
                 findQuery = $"({root}).*[is_num(@)][@ {FindTextBox.Text}]";
                 return;
             }
-            string keys_find_text;
-            string values_find_text;
+            string keysFindText;
+            string valuesFindText;
             if (RegexBox.Checked)
             {
                 if (IgnoreCaseCheckBox.Checked)
-                    keys_find_text = "g`(?i)" + FindTextBox.Text.Replace("`", "\\`") + '`';
+                    keysFindText = "g`(?i)" + FindTextBox.Text.Replace("`", "\\`") + '`';
                 else
-                    keys_find_text = "g`" + FindTextBox.Text.Replace("`", "\\`") + '`';
-                values_find_text = $"[str(@) =~ {keys_find_text}]";
+                    keysFindText = "g`" + FindTextBox.Text.Replace("`", "\\`") + '`';
+                valuesFindText = $"[str(@) =~ {keysFindText}]";
             }
             else if (MatchExactlyBox.Checked)
             {
@@ -152,14 +194,14 @@ namespace JSON_Tools.Forms
                     // exact matching is equivalent to regex matching
                     // with all special metacharacters escaped and anchors at the beginning and end
                     // add the (?i) flag for case-insensitive matching
-                    keys_find_text = "g`(?i)^" + Regex.Escape(FindTextBox.Text).Replace("\\", "\\\\").Replace("`", "\\`") + "$`";
-                    values_find_text = $"[str(@) =~ {keys_find_text}]";
+                    keysFindText = "g`(?i)\\A" + Regex.Escape(FindTextBox.Text).Replace("\\", "\\\\").Replace("`", "\\`") + "\\z`";
+                    valuesFindText = $"[str(@) =~ {keysFindText}]";
                 }
                 else
                 {
                     // simplest case; do normal hash map key search, or check if string equals find text exactly
-                    keys_find_text = "`" + FindTextBox.Text.Replace("`", "\\`") + "`";
-                    values_find_text = $"[str(@) == {keys_find_text}]";
+                    keysFindText = "`" + FindTextBox.Text.Replace("`", "\\`") + "`";
+                    valuesFindText = $"[str(@) == {keysFindText}]";
                 }
             }
             else
@@ -169,30 +211,30 @@ namespace JSON_Tools.Forms
                 if (IgnoreCaseCheckBox.Checked)
                 {
                     // add the (?i) flag for case-insensitive matching
-                    keys_find_text = "g`(?i)" + Regex.Escape(FindTextBox.Text).Replace("\\", "\\\\").Replace("`", "\\`") + "`";
-                    values_find_text = $"[str(@) =~ {keys_find_text}]";
+                    keysFindText = "g`(?i)" + Regex.Escape(FindTextBox.Text).Replace("\\", "\\\\").Replace("`", "\\`") + "`";
+                    valuesFindText = $"[str(@) =~ {keysFindText}]";
                 }
                 else
                 {
-                    keys_find_text = "g`" + Regex.Escape(FindTextBox.Text).Replace("\\", "\\\\").Replace("`", "\\`") + "`";
-                    values_find_text = $"[str(@) =~ {keys_find_text}]";
+                    keysFindText = "g`" + Regex.Escape(FindTextBox.Text).Replace("\\", "\\\\").Replace("`", "\\`") + "`";
+                    valuesFindText = $"[str(@) =~ {keysFindText}]";
                 }
             }
-            replaceQuery = $"s_sub(@, {keys_find_text}, `" + ReplaceTextBox.Text.Replace("`", "\\`") + "`)";
+            replaceQuery = $"s_sub(@, {keysFindText}, `" + ReplaceTextBox.Text.Replace("`", "\\`") + "`)";
             if (RecursiveSearchBox.Checked)
             {
                 switch (KeysValsBothBox.SelectedIndex)
                 {
                     case 0: // keys
-                        findQuery = $"({root})..{keys_find_text}";
+                        findQuery = $"({root})..{keysFindText}";
                         break;
                     case 1: // values
-                        findQuery = $"({root})..*{values_find_text}";
+                        findQuery = $"({root})..*{valuesFindText}";
                         break;
                     default: // both keys and values
                         findQuery = "concat(\r\n" +
-                                    $"    ({root})..{keys_find_text},\r\n" +
-                                    $"    ({root})..*{values_find_text}\r\n" +
+                                    $"    ({root})..{keysFindText},\r\n" +
+                                    $"    ({root})..*{valuesFindText}\r\n" +
                                     $")";
                         break;
                 }
@@ -201,15 +243,15 @@ namespace JSON_Tools.Forms
             switch (KeysValsBothBox.SelectedIndex)
             {
                 case 0: // keys
-                    findQuery = $"({root}).{keys_find_text}";
+                    findQuery = $"({root}).{keysFindText}";
                     break;
                 case 1: // values
-                    findQuery = $"{root}{values_find_text}";
+                    findQuery = $"{root}{valuesFindText}";
                     break;
                 default: // both keys and values
                     findQuery = "concat(\r\n" +
-                                $"    ({root}).{keys_find_text},\r\n" +
-                                $"    {root}{values_find_text}\r\n" +
+                                $"    ({root}).{keysFindText},\r\n" +
+                                $"    {root}{valuesFindText}\r\n" +
                                 $")";
                     break;
             }
@@ -226,19 +268,23 @@ namespace JSON_Tools.Forms
 
         private void ReplaceButton_Click(object sender, EventArgs e)
         {
-            int keysvals_index = KeysValsBothBox.SelectedIndex;
+            int keysvalsIndex = KeysValsBothBox.SelectedIndex;
             KeysValsBothBox.SelectedIndex = 1;
             AssignFindReplaceQueries();
             string root = (RecursiveSearchBox.Checked) ? $"(@{RootTextBox.Text})..*" : $"@{RootTextBox.Text}";
             // for math find/replace we want to filter before performing the operation
             // for regex find/replace the s_sub function naturally filters (because it's only replacing the target substring)
             // thus, we only want to use the findQuery to filter when doing math find/replace
-            treeViewer.QueryBox.Text = (MathBox.Checked)
-                ? findQuery + " = " + replaceQuery
-                : $"{root}[is_str(@)] = {replaceQuery}";
-            //treeViewer.QueryBox.Text = findQuery + " = " + replaceQuery;
+            string findPart = MathBox.Checked
+                ? $"var x = {findQuery}"
+                : $"var x = {root}[is_str(@)]";
+            treeViewer.QueryBox.Text = $"{findPart};\r\nx = {replaceQuery};\r\nx";
+            // use variable assignment, then mutate the variable, then show the variable.
+            // this is nice because (1) it introduces variable assignment,
+            // and (2) it displays exactly the values that were mutated rather than forcing the user to find them
             treeViewer.SubmitQueryButton.PerformClick();
-            KeysValsBothBox.SelectedIndex = keysvals_index;
+            treeViewer.Tree.Nodes[0].Expand();
+            KeysValsBothBox.SelectedIndex = keysvalsIndex;
         }
 
         private void SwapFindReplaceButton_Click(object sender, EventArgs e)

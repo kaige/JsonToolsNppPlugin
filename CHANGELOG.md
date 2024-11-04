@@ -1,5 +1,5 @@
 # Change Log
-All [notable changes](#570---2023-09-08) to this project will be documented in this file.
+All [notable changes](#810---2024-08-23) to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
  
 ### To Be Added
 
-1. Show multiple schema validation problems.
 2. Add configurable startup actions for grepper form. Might look like
 ```json
 // grepperFormStartupActions.json
@@ -20,40 +19,301 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
     ]
 }
 ```
-3. Add option for users to choose newline in JSON Lines and JSON-to-CSV.
- 
+3. Add option for users to choose newline in JSON Lines.
+4. Make it so find/replace form can emit Python code that is equivalent to the generated RemesPath query
+5. Make RemesPath error messages less confusing
+6. Implement a less thread-unsafe way to have ArgFunctions use context:
+    * Add `uses_context` field to ArgFunction instances, so that they have JQueryContext appended to their arguments, and they can reference fields of that JQueryContext.
+	* This way we don't have to have these methods mutating and referencing a global static variable.
+	* Additionally, the presence of a function with `uses_context=true` would serve as a flag that the query cannot be executed in parallel, because doing so would cause race conditions associated with the shared JQueryContext fields.
+7. Allow grepper form to parse JSON Lines documents. Would probably only try to parse `.jsonl` documents as JSON Lines.
+8. Bring back multi-threaded parsing of JSON in the grepper form. I had to go back to single-threaded to avoid deadlocks when reporting progress.
+9. Implement a progress bar for the [JSON-to-CSV form](/docs/json-to-csv.md).
+
 ### To Be Changed
 
-- If there's a validation error inside of an `anyOf` list of schemas (i.e. JSON doesn't validate under *any* of the schemas), the error message is rather uninformative, and says only "the JSON didn't validate under any of the schemas", but not *why* it didn't validate.
-- *(Note to future devs)*: Resist the temptation to fool around with the StringBuilder initial capacity for the ToString method of `Dtype.STR` JNodes. I tried, and it doesn't help performance. 
-- Mark dark mode icons that look less out of place
+- *(Note to future devs)*: Resist the temptation to fool around with the StringBuilder initial capacity for the ToString method of `Dtype.STR` JNodes. I tried, and it doesn't help performance.
 
 ### To Be Fixed
 
-- Improve Alt-key accelerators in forms. They don't seem to work right for some reason.
+- Make sure there aren't any easily-triggered race conditions induced by [automatic parsing and validation after editing](/docs/README.md#automatically-check-for-errors-after-editing).
+    - In 6.1.1.18, there is no longer a global shared JsonParser, which was the main potential source of race conditions.
+- Fix issue where pretty-printing or compressing causes tree view position tracking to be out of sync with the document until a query is issued or the `Refresh` button is hit.
+- Improve Alt-key accelerators *in forms*. They don't seem to work right for some reason.
 - When a tree viewer is refreshed using JSON from a file with a different name, the title of the docking form that the user sees doesn't change to reflect the new file. For example, a tree viewer is opened up for `foo.json` and then refreshed with a buffer named `bar.json`, and the title of the docking form still reads `Json Tree View for foo.json`.
 	- This is also true if a file with a tree viewer is renamed, e.g., the file `foo.json` is renamed to `bar.json`, but the tree viewer still says `Json Tree View for foo.json`.
 - Fix problem where icons disappear when going from light mode to dark mode (until Notepad++ is closed; does not persist after restart)
     - this problem only seems to appear after the user has opened a docking form, and maybe not even every time
 - bug with calling arg functions on projections - seems like object projections are treated as arrays when calling arg functions on them in some cases?
 - issue with treeview closing when a file with a treeview is moved from one view to another
+- `loop()` function used in `s_sub` callbacks is not thread-safe. *This doesn't matter right now* because RemesPath is single-threaded, but it could matter in the future.
+- GrepperForm loses its JSON permanently when the buffer associated with its treeview is deleted.
+- Since v7.0, holding down `Enter` in a multiline textbox (like the [tree viewer query box](/docs/README.md#remespath)) only adds one newline when the key is lifted.
+- Maybe use pre-7.1 (dictionary-based rather than indicator-based) [selection remembering](/docs/README.md#working-with-selections) for Notepad++ 8.5.5 and earlier? Indicators are risky with those older NPP's because of the lack of `NPPM_ALLOCATEINDICATOR`.
 
-## [5.8.0] - (UNRELEASED) YYYY-MM-DD
+## [8.2.0] - (UNRELEASED) YYYY-MM-DD
 
 ### Added
 
+1. When a file is renamed, the name of a [tree view](/docs/README.md#json-tools-overview) associated with that file also changes to match the new name. This also happens when a treeview is refreshed with JSON from a different file.
+2. Add [`rand_schema` RemesPath function](/docs/RemesPath.md#non-vectorized-functions) to generate random JSON from schema.
+
+### Changed
+
+1. If a number string is too large or small for a 64-bit floating point number (for example, `-2e700`, `3.5e+450`), the JSON parser will now represent them as `-Infinity` (if they have a leading `-` sign) or `Infinity`, rather than representing them as `NaN`. The linter also has a new message for when this happens.
+2. If a [JSON lines document](/docs/README.md#json-lines-documents) is not compliant with the strict JSON specification, the [status bar](/docs/README.md#error-form-and-status-bar) will now reflect that it is JSON lines.
+
+### Fixed
+
+1. Fix issue (introduced in v8.1, see issues [83](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/83) and [81](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/81)) where decimal numbers were given unnecessarily precise string representations. __For example, in JsonTools v8.1, `11.11` would be represented as `11.109999999999999` even though the original `11.11` was an equally valid representation.__ Now all decimal numbers will be given the more compact representation used in v8.0 and earlier *unless the more verbose representation introduced in v8.1 would be necessary to avoid loss of precision* (so there will be no regression on [issue 78](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/78)). Note that __this new algorithm for formatting decimal numbers is about twice as slow as the algorithm used in v8.1__, although the impact on performance will be much less dramatic unless you are compressing an array where almost every element is a non-integer decimal number.
+1. Fix the following issues with [random string from regex](/docs/README.md#random-strings-from-regex-added-in-v81):
+    - It previously incorrectly flagged some valid regular expressions (e.g. `(?-i)(?:xy{1,2}){,2}`) as having two consecutive quantifiers.
+	- It previously did not correctly handle some character sets where the final character was `-` (for example, `[+-]` previously would only generate `+`, and now it correctly has a 50% chance of generating `-` or `+`)
+2. Fix issue where RemesPath incorrectly inferred the type of (a [function](/docs/RemesPath.md#functions) `fun` followed by [indexers](/docs/RemesPath.md#indexing-and-selecting-keys)) to be the return type of `fun`. For example, running the query `sum(dict(items(@)).a)` on the JSON `{"a": [1]}` now correctly returns `1.0`, but RemesPath *used to raise an error because it assumed that `dict(items(@)).a` had the same type as `dict(items(@))`*
+3. Fix very rare crash bug when using the `Value to clipboard` option of the [tree node right-click context menu](/docs/README.md#get-info-about-tree-nodes).
+4. Fix bug where some invalid JSON Lines documents (for example, `[1, \n2][3]`) would be accepted by the [JSON Lines parser](/docs/README.md#json-lines-documents) despite having elements that span multiple lines.
+5. Fix minor bugs with how headers are formatted in [the `s_csv` RemesPath function](/docs/RemesPath.md#vectorized-functions) and [JSON-to-CSV form](/docs/README.md#json-to-csv).
+6. Fix bug where renaming a file subject to [schema validation based on filename patterns](/docs/README.md#automatic-validation-of-json-against-json-schema) would cause its tree view to be lost.
+7. Fix bug where plugin actions (mainly RemesPath queries in [regex mode](/docs/README.md#regex-search-form)) that set the text of the entire document to an empty string would not do anything. Those actions will now correctly remove all the text in the document.
+8. Fix [issue 79](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/79) where, on higher display resolutions than the default 125% normally used by molsonkiko in development, some of the advanced controls in the [find/replace form](/docs/README.md#find-and-replace-form) would not be visible.
+9. Fix annoying but harmless bug where, if the user had two views open and [ran a plugin command on one or more selections](/docs/README.md#working-with-selections) in the second view, the indicator that JsonTools uses to remember selections (which is supposed to be hidden at all times) would cause the selections to be underlined.
+10. Address [issue 80](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/80); now [error form](/docs/README.md#error-form-and-status-bar) will be cleared of errors when the JSON parser does not log any syntax errors.
+11. Make it so that JSON Lines documents are correctly formatted as JSON Lines after sorting by the [sort form](/docs/README.md#sort-form).
+12. Make it so that refreshing a tree view originally associated with `oldFile` with JSON from `newFile` will correctly cause the tree view to be associated with `newFile`. Previously, the tree view stayed associated with `oldFile`, so attempting to open a new tree view for `oldFile` would instead close the tree view now associated with `newFile`, because the command to open a tree view for a file closes that file's tree view if it already has an open one.
+
+## [8.1.0] - 2024-08-23
+
+### Added
+
+1. [Progress reporting](/docs/README.md#reporting-progress-when-parsing-large-amounts-of-json) with the JSON from files and APIs form (henceforth the `grepper form`).
+2. In the `grepper form`, pressing `Enter` inside the `Previously viewed directories...` box causes the current text of the box to be searched, assuming that it is a valid directory.
+3. [Translation](/README.md#translating-jsontools-to-another-language) of the following:
+    - Settings in the [Settings form](/docs/README.md#customizing-settings).
+    - [JSON syntax errors and JSON schema validation errors](/docs/README.md#error-form-and-status-bar) (under the `jsonLint` field of the [translation file](/translation/english.json5))
+    - Generic Windows message boxes (the boxes with `Ok`, `Yes`, `No`, and `Cancel` buttons and no other controls).
+5. The [`path_separator` setting](/docs/README.md#key_style-and-path_separator-settings) for formatting keys/indices and paths. Addresses [issue 69](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/69).
+6. Make it so left-clicking on the `Key/index to clipboard` and `Path to clipboard` options of the [treenode right-click context menu](/docs/README.md#get-info-about-tree-nodes) gets the path or key/index in whatever the default is from your settings, without having to click on one of the sub-menu items.
+7. The `grepper form` now supports `\` and `/` (path separators) in search patterns, as well as `**` to match any number of characters (including `\`).
+8. Generation of [random strings from regular expressions](/docs/README.md#random-strings-from-regex-added-in-v81).
+9. The `grepper form` now reads and parses all files asynchronously, and can be canceled.
+10. While the `grepper form` is working on a request, it now ignores clicks on the API request button and the Search directories button.
+
+### Changed
+
+1. Rename `Choose schemas to automatically validate filename patterns` to [`Validate files with JSON schema if name matches pattern`](/docs/README.md#automatic-validation-of-json-against-json-schema), in the hopes that the new name will be less confusing.
+2. Changed the wording of many JSON syntax error messages to be more consistent, per [conky77's suggestion here](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/70#issuecomment-2234114308).
+3. When attempting to translate to other languages, JsonTools now checks the UI language of Notepad++ before checking the Windows UI culture.
+4. When [automatic validation after editing](/docs/README.md#automatically-check-for-errors-after-editing) is turned on, only modifications that *change the text of the document* will trigger re-parsing.
+
+### Fixed
+
+1. If there would be an `OutOfMemoryException` due to running out of memory while formatting JSON (a likely occurrence when using the `grepper form`), that error is caught and reported with a message box, rather than potentially causing Notepad++ to crash.
+2. Ensure that hitting the down key does nothing when the last row of the [error form](/docs/README.md#error-form-and-status-bar) is selected.
+3. Fix bug with [random json from schema](/docs/README.md#generating-random-json-from-a-schema) when parsing a schema that has the `enum` key but not the `type` key.
+4. Make it so JsonTools simply does nothing rather than causing Notepad++ to crash when attempting to run plugin commands on files with more than 2147483647 bytes.
+5. Fixed number precision bug ([issue 78](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/78)).
+6. Rare bug [generating schemas from JSON](/docs/README.md#generating-json-schema-from-json), only seen with some arrays of objects.
+7. Rare crash when saving [`schemasToFnamePatterns.json`](/docs/README.md#automatic-validation-of-json-against-json-schema) if [automatic validation after editing](/docs/README.md#automatically-check-for-errors-after-editing) is enabled.
+8. Changes to the [`max_schema_validation_problems` setting](/docs/README.md#validating-json-against-json-schema) will apply immediately, including to previously compiled JSON schemas.
+9. Unrecoverable crash due to stack overflow when generating [random JSON from a recursive schema](/docs/README.md#generating-random-json-from-a-schema).
+
+## [8.0.0] - 2024-06-29
+
+### Added
+
+1. Made it possible to translate [JsonTools into other languages](/README.md#translating-jsontools-to-another-language).
+2. Made the tree view font size configurable with the [`tree_view_font_size` setting](/docs/README.md#styling-of-forms). Fixes [issue 66](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/66).
+3. Added dark mode tree view icons (addresses [this GH issue comment](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/66#issuecomment-2169216078)).
+4. Allow users to manually enter directory names in the [JSON from files and APIs form](/docs/README.md#getting-json-from-local-directories) (referred to as "grepper form" for the rest of this section) rather than using a dialog or the dropdown menu.
+5. Added a "Search directories" button to the grepper form.
+
+### Changed
+
+1. Removed the `max_threads_parsing` setting for the [grepper form](/docs/README.md#get-json-from-files-and-apis), because the underlying implementation was changed in a way that made that setting useless.
+2. __Removed the `allow_datetimes` setting__, because I do not feel confident that the potential benefits of the setting outweigh the danger of accidentally changing the format of people's dates or datetimes in some way that they were not expecting.
+3. When all files have been parsed in the directory chosen with the [grepper form](/docs/README.md#getting-json-from-local-directories), the directory name is no longer reset to the default value.
+4. Added a hard limit to the total combined size of all files parsed by the grepper form, to avoid hitting memory errors.
+
+### Fixed
+
+1. Avoid unnecessarily refreshing the styles of all forms when settings other than `use_npp_styling` or `tree_view_font_size` are changed.
+2. The list of recently chosen directories in the grepper form is pre-filtered for existing directories, to hide the partial directory names that contaminate the config file.
+3. Fix bug where, if a setting in the config file had an invalid value (for example, a numeric setting having a value of `blah`), there might be an uncaught exception that would cause Notepad++ to crash. This bug appeared to be most likely to occur when the localization is *not* set to `en-us`.
+
+## [7.2.0] - 2024-04-19
+
+### Added
+
+1. [`Check JSON syntax now` command](/docs/README.md#check-json-syntax-now).
+
+### Changed
+
+1. Made it so that reloading the [error form](/docs/README.md#error-form-and-status-bar) by pressing `Enter` would not cause certain message boxes to appear, to eliminate a potential "infinite" loop where the user would hit `Enter` to close the message box, and that moved focus back to the error form, which then repeated the cycle when they lifted the `Enter` key.
+2. [Automatic validation](/docs/README.md#automatically-check-for-errors-after-editing) when `auto_validate` is true no longer opens the prompt asking if user wants to open the error form (if [`offer_to_show_lint`](/docs/README.md#parser-settings) is true), because that could cause Notepad++ to crash or hang forever (see [issue 60](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/60#issuecomment-2065419075)).
+3. Made it so that automatic JSON schema validation (that is, any validation not manually invoked by the plugin menu command) no longer causes the caret to move to the location of the first schema validation error.
+4. Automatic validation (including non-schema validation) now refreshes the error form.
+
+### Fixed
+
+1. Minor bug in [PPrint remembering comments](/docs/README.md#remember_comments) algorithm implementation that caused some arrays and objects to be compressed when they should have been pretty-printed.
+2. Fix bug where tests could crash under some circumstances due to filesystem weirdness making it impossible to find test files.
+
+## [7.1.0] - 2024-02-28
+
+### Added
+
+1. `minLength` and `maxLength` keywords are now considered when making [random JSON from schema](/docs/README.md#generating-random-json-from-a-schema)
+2. JsonTools now automatically navigates to the location of the fatal error when it fails to parse a document, unless the attempted parse was auto-triggered (say, by the [automatic parse after editing](/docs/README.md#automatically-check-for-errors-after-editing))
+3. [Selection-based mode](/docs/README.md#working-with-selections) now supports any number of remembered selections, and undo and redo actions usually do not cause selections to be forgotten. Performance also appears to be better.
+
+### Changed 
+
+1. If the location of an error is between the `CR` and the `LF` of a `CR LF` newline, JsonTools will now always move before the `CR`, rather than placing the caret in between them, which could cause confusion.
+2. [Automatic JSON schema validation after editing](/docs/README.md#automatically-check-for-errors-after-editing) does not happen when the document is in `REGEX` mode.
+3. Removed the `max_tracked_json_selections` setting, as it is no longer necessary.
+
+### Fixed
+
+1. Using the [Notepad++ find/replace form](https://npp-user-manual.org/docs/searching/#dialog-based-searching) in Notepad++ versions 8.6.3 and 8.6.4 now appropriately shifts remembered selections when in [selection-based mode](/docs/README.md#working-with-selections).
+2. Bug where the space key did not work on the [regex search form](/docs/README.md#regex-search-form).
+3. Bug where [automatic JSON schema validation after editing](/docs/README.md#automatically-check-for-errors-after-editing) sometimes caused a deadlock that disabled some functionalities until Notepad++ closed.
+4. Possible plugin crash due to index-out-of-bounds error during parsing of [JSON Lines](/docs/README.md#json-lines-documents).
+
+## [7.0.0] - 2024-02-09
+
+### Added
+
+1. [PPrint-style pretty-printing that remembers comments](/docs/README.md#remember_comments)
+2. Add [`and` and `or` non-vectorized functions in RemesPath](/docs/RemesPath.md#non-vectorized-functions), which both use conditional excution.
+3. Add [`s_format` vectorized RemesPath function](/docs/RemesPath.md#vectorized-functions), for easy reformatting of JSON strings.
+4. [Python-style single-line comments in RemesPath](/docs/RemesPath.md#comments-added-in-v62)
+5. A [RemesPath user-defined language (UDL) file](/RemesPath%20UDL.xml), providing some very basic syntax highlighting. It is buggy, but that is because the UDL system is inherently buggy, not because I did anything wrong (as far as I know).
+6. A `:` character between two key-value pairs in an object no longer causes a fatal error that makes the parser quit.
+7. Add new `auto_try_guess_csv_delim_newline` setting. If this is true (default false), [Regex search form](/docs/README.md#regex-search-form) now makes a very basic attempt to "sniff" if the current file is CSV whenever it is opened, or when the `Parse as CSV?` button is toggled on.
+
+### Changed
+
+1. __Support for multiple [JSON schema validation problems](/docs/README.md#validating-json-against-json-schema)__
+2. __All [RemesPath regular expressions](/docs/RemesPath.md#regular-expressions) are now multiline__, meaning that `^` and `$` now match the start and end of *lines* respectively, rather than the start and end of the *document.*
+3. The [`ifelse` vectorized function in RemesPath](/docs/RemesPath.md#vectorized-functions) now uses conditional execution.
+4. Default value for [`sort_keys` setting](/docs/README.md#sort_keys) is now `false`, meaning keys are left in their original order by default. This will not change existing settings. 
+5. Add optional arguments [to `stringify` non-vectorized function in RemesPath](/docs/RemesPath.md#non-vectorized-functions), so that users can control the format of the output.
+5. Make dark mode icons darker.
+6. *This change only affects the code base, not the public API:* changed almost all snake_case variable names to camelCase. [RemesPath functions still use snake_case](/JsonToolsNppPlugin/JSONTools/RemesPathFunctions.cs) (e.g., `s_mul` and `group_by` still have those names), and all the settings in [Settings.cs](/JsonToolsNppPlugin/Utils/Settings.cs) (e.g., `use_npp_styling`) that were previously snake_case are still snake_case.
+7. [Automatic linting after edits](/docs/README.md#automatically-check-for-errors-after-editing) is now disabled while in [selection-based mode](/docs/README.md#working-with-selections).
+8. [Automatic linting after edits](/docs/README.md#automatic-validation-of-json-against-json-schema) will always attempt to parse the entire document, even if the user has made a selection that could be parsed as JSON.
+9. Numbers with unnecessary leading 0's (like `01` or `002.5`) are now [logged at the `BAD` level](/docs/README.md#parser-settings), and numbers with trailing decimal points are now logged at the `JSON5` level.
+10. [Error form](/docs/README.md#error-form-and-status-bar) keypress triggers now execute when the key is released, rather than when it is depressed.
+11. [Automatic JSON schema validation](/docs/README.md#automatic-validation-of-json-against-json-schema) now ignores the user's selections and always validates the entire document.
+
+### Fixed
+
+1. Fixed issue where [vectorized functions in RemesPath](/docs/RemesPath.md#vectorized-functions) were not vectorized across objects if the first argument was a function of input and at least one of the non-first arguments was also a function of input.
+2. Fixed issue where entering invalid text into comboboxes in the [regex search form](/docs/README.md#regex-search-form) and [grepper form](/docs/README.md#get-json-from-files-and-apis) could cause a (mostly harmless) plugin crash.
+3. Improved refresh and loading speed for tree viewer on very large files in [regex mode](/docs/README.md#regex-search-form).
+4. Fix issue where tree view tracking of capture groups in [regex search mode](/docs/README.md#regex-search-form) was wrong in some cases involving non-ASCII characters.
+5. Hitting `Escape` in the error form moves focus to the editor component.
+6. When logging errors in [selection-based mode](/docs/README.md#working-with-selections), the [error form](/docs/README.md#error-form-and-status-bar) now navigates to the location of the error in the overall document. Previously it navigated to the location of the error relative to the start of the selection.
+7. The regex search form no longer closes the currently active tree viewer when you focus or open it.
+8. Register forms (other than the modal AboutForm and JSON-to-CSV form) with Notepad++ using [NPPM_MODELESSDIALOG](https://npp-user-manual.org/docs/plugin-communication/#2036-nppm-modelessdialog). This permanently fixes [the regression in Notepad++ 8.6.1](https://github.com/molsonkiko/JsonToolsNppPlugin/issues/54) where Ctrl+X and Ctrl+C stopped working in textboxes.
+
+## [6.1.1] - 2023-12-28
+
+### Fixed
+
+1. Eliminated potentially unrecoverable plugin crash when JSON parser tries to parse document with `-` or `+` not followed by numeric chars (e.g. `-a`, `+`). Now such badly formatted numbers are parsed as `NaN`.
+
+## [6.1.0] - 2023-12-28
+
+### Added
+
+1. [Python-style f-strings in RemesPath](/docs/RemesPath.md#f-strings-to-easily-glue-together-strings-and-non-strings-added-in-v61).
+2. [`s_cat` RemesPath non-vectorized function](/docs/RemesPath.md#non-vectorized-functions).
+3. [`s_lines`, `s_lpad`, `s_rpad`, and `zfill` RemesPath vectorized functions](/docs/RemesPath.md#vectorized-functions).
+4. [`Select all children` treenode action](/docs/README.md#select-tree-nodes-json-or-its-children-added-in-v57) now works for root treenode in JSON Lines and selection-based documents.
+
+### Changed
+
+1. RemesPath syntax errors (anything caught by the lexer) now use `>>>HERE>>>` before the character where the error occurred, similar to how the Notepad++ find/replace form indicates the location of a regular expression syntax error.
+2. *Not part of public-facing API:* Renamed the `JQueryContext.Evaluate` method to `JQueryContext.Operate`, and renamed `JMutator.Mutate` to `JMutator.Operate`.
+3. Make it so [automatic validation](/docs/README.md#automatically-check-for-errors-after-editing) does not require the document to be re-parsed as JSON, and is suppressed when in regex or ini mode.
+
+### Fixed
+
+1. Eliminated plugin crash when attempting to open the [regex search form](/docs/README.md#regex-search-form) after it had been closed.
+2. Greatly improved [error form](/docs/README.md#error-form-and-status-bar) reloading performance. 
+3. Some UI test failures (and probably related weirdness in public API) on older NPP versions
+4. Fix bug where [`s_csv` RemesPath function](/docs/RemesPath.md#vectorized-functions) did not properly handle delimiters that were regex metacharacters like `|`
+
+## [6.0.0] - 2023-12-13
+
+### Added
+
+1. Option to customize which [toolbar icons](/docs/README.md#toolbar-icons) are displayed, and their order.
+2. __New [regex search form](/docs/README.md#regex-search-form) for using treeview to see regex search results in any file.__
+3. New [document type list box in tree view](/docs/README.md#document-type-box-added-in-v60)
+4. [For loops in RemesPath](/docs/RemesPath.md#for-loopsloop-variables-added-in-v60)
+5. [`bool`, `num`, `s_csv` and `s_fa` RemesPath vectorized arg functions](/docs/RemesPath.md#vectorized-functions)
+6. [`randint`, `csv_regex`, `set`, and `to_csv` RemesPath non-vectorized arg functions](/docs/RemesPath.md#non-vectorized-functions)
+7. Make second argument of [`s_split` RemesPath function](/docs/RemesPath.md#vectorized-functions) optional; 1-argument variant splits on whitespace.
+8. Right-click dropdown menu in [error form](/docs/README.md#error-form-and-status-bar), allowing export of errors to JSON or refreshing the form.
+9. The [JSON parser](/docs/README.md#parser-settings) is now much better at recovering when an object is missing its closing `'}'` or an array is missing its closing `']'`.
+10. Support for [JSON Schema validation](/docs/README.md#validating-json-against-json-schema) of `enum` keyword where the `type` is missing or an array.
+11. `Ctrl+Up` now snaps to parent of currently selected node in tree view. `Ctrl+Down` now snaps to the last direct child of the currently selected node.
+
+### Changed
+
+1. __The internal representation of object keys has changed to allow unescaped strings as keys (*THIS DOES NOT AFFECT THE PUBLIC API EXCEPT IN SOME CORNER CASES IN REMESPATH*).__
+    * What I mean by this is that previously the key in the JSON object `{"\"": 3}` was *previously* internally represented as `"\\\""`, with the quote character escaped as shown.
+	* This had the advantage of making it slightly faster to display object keys (e.g., when pretty-printing/compressing/dumping), but *made it impossible for certain strings to be valid object keys, in a way that could not be detected except when pretty-printing or compressing.*
+	* Under the new system as of this version, all strings are acceptable as object keys. This has positive implications for RemesPath, as it means that users do not need to remember to escape string JNodes before using them as keys in an object.
+2. When using the [JSON-to-CSV form](/docs/json-to-csv.md#how-json-nodes-are-represented-in-csv) to create CSV files, newline characters will no longer be escaped in strings. This is one of several changes made in order to acheive compliance with [RFC 4180](https://www.ietf.org/rfc/rfc4180.txt).
+3. Made [`offer_to_show_lint` setting](/docs/README.md#parser-settings) (which controls whether a prompt is shown when errors are found) true by default, so that a fresh installation will show the prompt.
+4. Change RemesPath indexers to reduce the number of backslash escapes needed to get keys containing special characters like `"a\\b"` or `"\"foo\"\tbar"`. For instance, previously ``@.`\\n\\\\a\"` `` would be required to match the key `"\n\\a\""`, whereas now `` @.`\n\\a"` `` matches it.
+5. Running a RemesPath query only causes an attempted re-parsing of the document if the treeview's current file is open.
+6. Running a replace query on the [find/replace form](/docs/README.md#find-and-replace-form) now causes the tree to display only the values that were mutated.
+7. Changed the tabstop order of some forms, made it so that the find/replace form has complete tabstop coverage, and eliminated some tabstop-related issues associated with combo boxes in some forms.
+8. Benchmarks for compiling RemesPath queries now more accurately represent the effect of caching on performance.
+
+### Fixed
+
+1. Fixed plugin crash when attempting to parse too-large hex numbers like `0x100000000000000000000`. Now the parser will fatally fail and add a lint indicating the issue, but the plugin will not actually crash.
+2. Fixed some weird issues where mutating a variable in RemesPath could cause re-executing a query on the same input to return a different value. A minimal example: `var x = 1; x = @ + 1; x` would return 1 + (the number of times the query was executed) prior to this fix, but now it will always return `2` as expected. This was also true of a bunch of other things in RemesPath, including [projections and the map operator](/docs/RemesPath.md#projections).
+3. Fix issues where running a RemesPath query with a projection that referenced a variable indexing on a compile-time constant would cause an error. For example, `var x = @; 1->x` should return `@` (the input to the query), but prior to this fix, it would instead cause an error.
+4. Running tests would previously cause clipboard data to be lost irreversably. Now, if the user's clipboard contained text before running tests, the contents of the clipboard are restored to their pre-test values rather than being hijacked. __Non-text data that was copied to the clipboard is still lost when running tests, and I may try to fix that in the future.__ 
+5. `dict` function in RemesPath previously had a bug that could create invalid JSON if the strings to be turned into keys contained special characters (e.g., literal quote chars, `\r`, `\n`).
+6. access violations when loading [error form](/docs/README.md#error-form-and-status-bar)
+7. unnecessary prompt when manually reloading [error form](/docs/README.md#error-form-and-status-bar)
+8. issue with trying to view error form when the error form was already open
+9. RemesPath backtick strings now can have a literal `\` character just before the closing backtick. Previously this was impossible because of a regex-writing bug.
+10. Eliminated plugin crash when attempting to validate with an invalid JSON schema. Now a message box will show in that situation.
+
+## [5.8.0] - 2023-10-09
+
+### Added
+
+1. __Add [parser for `.ini` files](/docs/README.md#parsing-ini-files)__, allowing them to reformatted, viewed with the tree view, and queried and edited with RemesPath.
 1. [Python-style spreading of an array](/docs/RemesPath.md#spreading-function-args-to-fill-multiple-arguments-added-in-v58) with `*` to fill multiple arguments of a function.
 2. New RemesPath function(s): [`at` function](/docs/RemesPath.md#non-vectorized-functions) for indexing into array or object at an index or key determined at runtime (since indexing with square braces does not support keys/indices that are functions of input).
 3. Made it possible to customize newline for CSV files generated by the [JSON-to-CSV form](/docs/README.md#json-to-csv).
 
 ### Changed
 
-1. All instances of `\r` (carriage return) in strings are now escaped to `\\r` when generating CSVs with the [JSON to CSV form](/CHANGELOG.md#580---unreleased-yyyy-mm-dd).
+1. If the user chooses to parse a document as JSON Lines or INI using one of the commands from the main plugin menu, their choice is remembered when the document is re-parsed (including when the tree is re-opened and when the document is pretty-printed and compressed).
+	- For example, previously if you used the `Parse JSON Lines document` to parse a document as JSON Lines, and then closed and re-opened the tree view, the tree would be re-opened as JSON. Now the tree view will be re-opened as JSON Lines.
+	- This remembered choice can be overridden by parsing as INI or JSON Lines again, selecting valid JSON, or (sometimes) selecting the entire document (if it is valid JSON).
+2. All instances of `\r` (carriage return) in strings are now escaped to `\\r` when generating CSVs with the [JSON to CSV form](/CHANGELOG.md#580---2023-10-09).
+3. Prompt user (can disable the prompt if desired) before pretty-printing [JSON Lines documents](/docs/README.md#json-lines-documents).
 
 ### Fixed
 
-1. Fixed bug where changing the `try_parse_start_chars` setting would cause UI tests to fail.
-2. Plugin crashes with single-line comments (both Python-style and JavaScript-style) that had no trailing newline.
+1. Bug where reformatting some large floating-point numbers would output text that could not subsequently be parsed.
+2. Fixed bug where changing the `try_parse_start_chars` setting would cause UI tests to fail.
+3. JSON Lines documents can now be edited with RemesPath while keeping them in JSON Lines format.
+4. Issue where multiple tabs would be used for indentation when both the `tab_indent_pretty_print` and `remember_comments` settings were true (only on files with comments). 
+5. Plugin crashes with single-line comments (both Python-style and JavaScript-style) that had no trailing newline.
+6. Bug where one-character comments that went to EOF would be truncated to an empty string.
+7. UI test failures when `sort_keys` setting was false.
 
 ## [5.7.0] - 2023-09-08
 
@@ -603,7 +863,7 @@ __[.NET Framework 4.8](https://learn.microsoft.com/en-us/dotnet/framework/migrat
 
 1. [Menu command](/docs/README.md#path-to-current-line) for getting path to first node in current line.
 2. Right-clicking on tree nodes lets you get the current node's value, key/index in parent iterable, or path.
-3. [key_style](/docs/README.md#key-style) option in settings for customizing how the path is formatted (e.g., dot syntax for JavaScript vs. obligatory square brackets and quotes for Python)
+3. [key_style](/docs/README.md#key_style-and-path_separator-settings) option in settings for customizing how the path is formatted (e.g., dot syntax for JavaScript vs. obligatory square brackets and quotes for Python)
 4. Automatic resizing of the query box and the tree view when the docking box is resized.
 5. A text box containing the path to the currently selected tree node (in the default key style) and a [button for copying it to the clipboard](/docs/README.md#get-info-about-tree-nodes).
 

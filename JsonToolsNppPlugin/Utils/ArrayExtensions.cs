@@ -101,20 +101,20 @@ namespace JSON_Tools.Utils
 
         /// <summary>
         /// If num is negative, use Python-style negative indices (e.g., -1 is the last element, -len is the first elememnt)
-        /// Otherwise, restrict num to between 0 and len (inclusive unless is_start_idx)
+        /// Otherwise, restrict num to between 0 and len (inclusive unless isStartIdx)
         /// </summary>
         /// <param name="len"></param>
         /// <param name="num"></param>
         /// <returns></returns>
-        public static int ClampWithinLen(int len, int num, bool is_start_idx)
+        public static int ClampWithinLen(int len, int num, bool isStartIdx)
         {
             if (num >= len)
-                return is_start_idx ? len - 1: len;
+                return isStartIdx ? len - 1: len;
             if (num < 0)
             {
                 num += len;
                 if (num < 0)
-                    return is_start_idx ? 0 : -1;
+                    return isStartIdx ? 0 : -1;
                 return num;
             }
             return num;
@@ -273,6 +273,14 @@ namespace JSON_Tools.Utils
             return new string(source.ToCharArray().LazySlice(start, stop, stride).ToArray());
         }
 
+        /// <summary>
+        /// s_slice(x: string, sli: integer | slicer) -> string<br></br>
+        /// uses Python slicing syntax.<br></br>
+        /// EXAMPLES:<br></br>
+        /// * s_slice(abcde, 1:-2) returns "bc"<br></br>
+        /// * s_slice(abcde, :2) returns "ab"<br></br>
+        /// * s_slice(abcde, -2) returns "d"<br></br>
+        /// </summary>
         public static string Slice(this string source, int?[] slicer)
         {
             return new string(source.ToCharArray().LazySlice(slicer).ToArray());
@@ -378,6 +386,15 @@ namespace JSON_Tools.Utils
             idx = idx >= 0 ? idx : idx + count;
             atIdx = source.Substring(idx, 1);
             return true;
+        }
+
+        /// <summary>
+        /// Return the first element of list if idx is not a valid index for this IList.<br></br>
+        /// Otherwise return list[idx]
+        /// </summary>
+        public static T FirstIfOutOfBounds<T>(this IList<T> list, int idx)
+        {
+            return list[idx >= list.Count || idx < 0 ? 0 : idx];
         }
     }
 }

@@ -14,6 +14,7 @@ namespace JSON_Tools.Forms
         public SortForm()
         {
             InitializeComponent();
+            NppFormHelper.RegisterFormIfModeless(this, false);
             SortMethodBox.SelectedIndex = 0;
             remesParser = new RemesParser();
             FormStyle.ApplyStyle(this, Main.settings.use_npp_styling);
@@ -22,8 +23,8 @@ namespace JSON_Tools.Forms
 
         private void SortButton_Clicked(object sender, EventArgs e)
         {
-            (bool fatal, JNode json, bool usesSelections) = Main.TryParseJson();
-            if (fatal || json == null)
+            (ParserState parserState, JNode json, bool usesSelections, DocumentType docType) = Main.TryParseJson(preferPreviousDocumentType:true);
+            if (parserState == ParserState.FATAL || json == null)
                 return;
             string pathQuery = "@" + PathTextBox.Text;
             JNode jsonAtPath;
@@ -33,9 +34,10 @@ namespace JSON_Tools.Forms
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Could not find json at the specified path\r\nGot the following error:\r\n{ex}",
+                Translator.ShowTranslatedMessageBox("Could not find json at the specified path ({0}).\r\nGot the following error:\r\n{1}",
                     "Could not find json at that path",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBoxButtons.OK, MessageBoxIcon.Error,
+                    2, pathQuery, RemesParser.PrettifyException(ex));
                 return;
             }
             Func<JNode, JNode> query = null;
@@ -50,9 +52,11 @@ namespace JSON_Tools.Forms
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Based on selected sort method, attempted to compile query \"{queryText}\",\r\nbut got the following error:\r\n{ex}",
-                        "Failed to compile query",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Translator.ShowTranslatedMessageBox(
+                        "Based on selected sort method, attempted to compile query \"{0}\",\r\nbut got the following error:\r\n{1}",
+                        "Failed to compile query for sorting",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error,
+                        2, queryText, RemesParser.PrettifyException(ex));
                     return;
                 }
             }
@@ -77,9 +81,10 @@ namespace JSON_Tools.Forms
                 else
                 {
                     string gotType = JNode.FormatDtype(jsonAtPath.type);
-                    MessageBox.Show($"JSON at the specified path must be object or array, got {gotType}",
+                    Translator.ShowTranslatedMessageBox("JSON at the specified path must be object or array, got type {0}",
                         "JSON at specified path must be object or array",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBoxButtons.OK, MessageBoxIcon.Error,
+                        1, gotType);
                     return;
                 }
             }
@@ -88,7 +93,10 @@ namespace JSON_Tools.Forms
                 if (!SortSingleJson(jsonAtPath, query))
                     return;
             }
-            Main.ReformatFileWithJson(json, Main.PrettyPrintFromSettings, usesSelections);
+            Func<JNode, string> formatter = Main.PrettyPrintFromSettings;
+            if (docType == DocumentType.JSONL)
+                formatter = Main.ToJsonLinesFromSettings;
+            Main.ReformatFileWithJson(json, formatter, usesSelections);
         }
 
         /// <summary>
@@ -101,9 +109,10 @@ namespace JSON_Tools.Forms
             if (!(toSort is JArray arr))
             {
                 string gotType = JNode.FormatDtype(toSort.type);
-                MessageBox.Show($"Can only sort arrays, not {gotType}",
-                    $"Can't sort {gotType}s",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Translator.ShowTranslatedMessageBox("Can only sort arrays, got JSON of type {0}",
+                    "Can only sort arrays",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error,
+                    1, gotType);
                 return false;
             }
             try
@@ -127,9 +136,10 @@ namespace JSON_Tools.Forms
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"While sorting the array, got the following error:\r\n{ex}",
+                Translator.ShowTranslatedMessageBox("While sorting an array, got the following error:\r\n{0}",
                     "Error while sorting array",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBoxButtons.OK, MessageBoxIcon.Error,
+                    1, RemesParser.PrettifyException(ex));
                 return false;
             }
             if (ReverseOrderCheckBox.Checked && ReverseOrderCheckBox.Enabled)
@@ -162,46 +172,20 @@ namespace JSON_Tools.Forms
         }
 
         /// <summary>
-        /// Enter presses button,
-        /// escape focuses editor (or closes if closeOnEscape),
-        /// tab goes through controls,
-        /// shift-tab -> go through controls backward
+        /// suppress the default response to the Tab key
         /// </summary>
-        /// <param name="form"></param>
-        public static void GenericKeyUpHandler(Form form, object sender, KeyEventArgs e, bool closeOnEscape = false)
+        /// <param name="keyData"></param>
+        /// <returns></returns>
+        protected override bool ProcessDialogKey(Keys keyData)
         {
-            // enter presses button
-            if (e.KeyCode == Keys.Enter)
-            {
-                e.Handled = true;
-                if (sender is Button btn)
-                {
-                    // Enter has the same effect as clicking a selected button
-                    btn.PerformClick();
-                }
-            }
-            // Escape -> go to editor or close
-            else if (e.KeyData == Keys.Escape)
-            {
-                if (closeOnEscape)
-                    form.Close();
-                else
-                    Npp.editor.GrabFocus();
-            }
-            // Tab -> go through controls, Shift+Tab -> go through controls backward
-            else if (e.KeyCode == Keys.Tab)
-            {
-                Control next = form.GetNextControl((Control)sender, !e.Shift);
-                while (next == null || !next.TabStop || !next.Enabled)
-                    next = form.GetNextControl(next, !e.Shift);
-                next.Focus();
-                e.Handled = true;
-            }
+            if (keyData.HasFlag(Keys.Tab)) // this covers Tab with or without modifiers
+                return true;
+            return base.ProcessDialogKey(keyData);
         }
 
         private void SortForm_KeyUp(object sender, KeyEventArgs e)
         {
-            GenericKeyUpHandler(this, sender, e);
+            NppFormHelper.GenericKeyUpHandler(this, sender, e, false);
             //if (e.Alt)
             //{
             //    if (e.KeyCode == Keys.S)

@@ -1,5 +1,4 @@
 ﻿using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 // General Information about an assembly is controlled through the following 
@@ -10,7 +9,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Mark Johnston Olson")]
 [assembly: AssemblyProduct("JSON tools plugin for Notepad++")]
-[assembly: AssemblyCopyright("Copyright © molsonkiko 2022-2023")]
+[assembly: AssemblyCopyright("Copyright © molsonkiko 2022-2024")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -29,5 +28,5 @@ using System.Runtime.InteropServices;
 //      Build Number
 //      Revision
 //
-[assembly: AssemblyVersion("5.7.0.4")]
-[assembly: AssemblyFileVersion("5.7.0.4")]
+[assembly: AssemblyVersion("8.1.0.14")]
+[assembly: AssemblyFileVersion("8.1.0.14")]

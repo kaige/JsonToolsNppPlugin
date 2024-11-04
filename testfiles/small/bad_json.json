@@ -14,14 +14,14 @@ y":
             .75 
 -0xF            +0xabcde
 0xABCDE
-            },
+            , // missing ']' here
       "y
 u":
             [
                   [
                   -.5,
                         {
-                        "y" : 'b\9\x0a',
+                        "y" : 'b\9\x0a':
                         "m8": 9.,
                         }
                   ],
