@@ -345,6 +345,11 @@ namespace JSON_Tools.Forms
                 RefreshButton.PerformClick();
             bool usesSelections = UsesSelections();
             string query = QueryBox.Text;
+
+            // 2024.11.04 - kaige: modified the behavior to expanding tree viewer to the target path
+            ExpandToThePath(query);
+            return;
+
             JNode queryFunc;
             // complex queries may mutate the input JSON but return only a subset of the JSON.
             // in this case, we want the tree to be populated by the subset returned by query_func.Operate (because the point of the tree is to provide a view into subsets of the input)
@@ -497,6 +502,49 @@ namespace JSON_Tools.Forms
                 treeFunc = queryResult;
             }
             JsonTreePopulate(treeFunc);
+        }
+
+        // expand the tree viewer's node to the given path
+        public void ExpandToThePath(string path)
+        {
+            // for some reasons, below code will change the editor's current position, so save it to restore later
+            //
+            int oldEditorPos = Npp.editor.GetCurrentPos();
+
+            // refresh the tree view to make sure the tree is correct, and also removes the background color set in last query
+            //
+            RefreshButton.PerformClick();
+
+            // now we expand to the queried node
+            //
+            TreeNode nextNode = this.Tree.Nodes[0];
+            while (nextNode != null)
+            {
+                nextNode.Expand();
+                bool findValidChild = false;
+                for (int i = 0; i < nextNode.Nodes.Count; i++)
+                {
+                    TreeNode child = nextNode.Nodes[i];
+                    string pathToChild = PathToTreeNode(child, KeyStyle.RemesPath);
+                    if (path.Contains(pathToChild))
+                    {
+                        nextNode = child;
+                        nextNode.BackColor = System.Drawing.Color.Orange;
+                        findValidChild = true;
+                        continue;
+                    }
+                }
+
+                if (!findValidChild)
+                {
+                    break;
+                }
+
+            }
+            // for some reasons, the above code changes the editor's current position, so restore it here
+            Npp.editor.SetEmptySelection(oldEditorPos);
+
+            return;
         }
 
         private void QueryToCsvButton_Click(object sender, EventArgs e)
