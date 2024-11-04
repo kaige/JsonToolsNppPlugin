@@ -543,6 +543,7 @@ namespace JSON_Tools.Forms
             }
             // for some reasons, the above code changes the editor's current position, so restore it here
             Npp.editor.SetEmptySelection(oldEditorPos);
+            Npp.editor.ScrollCaret();
 
             return;
         }
